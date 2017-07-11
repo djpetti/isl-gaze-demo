@@ -41,11 +41,17 @@ class Canvas(object):
     """ Returns: The window width and height, as a tuple. """
     return (self.__window_width, self.__window_height)
 
+  def set_background_color(self, color):
+    """ Sets the background color of the canvas.
+    Args:
+      color: The color to set it to. """
+    self.__canvas.config(bg=color)
+
 
 class _CanvasObject(object):
   """ Handles drawing an object in a Tkinter canvas window. """
 
-  def __init__(self, canvas, pos, fill=None):
+  def __init__(self, canvas, pos, fill=None, outline="black"):
     """
     Args:
       canvas: The Canvas to draw on.
@@ -59,6 +65,8 @@ class _CanvasObject(object):
     self._pos_x, self._pos_y = pos
     # The object's fill color.
     self._fill = fill
+    # The object's outline color.
+    self._outline = outline
 
     self.__draw_object()
 
@@ -90,6 +98,24 @@ class _CanvasObject(object):
 
     self._canvas.move_object(self._reference, move_x, move_y)
     self._canvas.update()
+
+  def get_pos(self):
+    """
+    Returns:
+      The position of the object. """
+    return (self._pos_x, self._pos_y)
+
+  def move(self, x_shift, y_shift):
+    """ Moves an object by a certain amount. It does not update the canvas
+    afterwards.
+    Args:
+      x_shift: How far to move in the x direction.
+      y_shift: How far to move in the y direction. """
+    # Update the position.
+    self._pos_x += x_shift
+    self._pos_y += y_shift
+
+    self._canvas.move_object(self._reference, x_shift, y_shift)
 
   def delete(self):
     """ Deletes the object from the canvas. """
@@ -123,4 +149,33 @@ class Circle(_CanvasObject):
     p2_y = self._pos_y + self.__radius
 
     self._reference = canvas.create_oval(p1_x, p1_y, p2_x, p2_y,
-                                         fill=self._fill)
+                                         fill=self._fill,
+                                         outline=self._outline)
+
+class Rectangle(_CanvasObject):
+  """ Draws a rectangle on the canvas. """
+
+  def __init__(self, canvas, pos, size, **kwargs):
+    """
+    Args:
+      canvas: The Canvas to draw on.
+      pos: The center position of the rectangle.
+      size: The width and height of the rectangle. """
+    self.__width, self.__height = size
+
+    super(Rectangle, self).__init__(canvas, pos, **kwargs)
+
+  def _draw_object(self):
+    """ Draw the rectangle on the canvas. """
+    # Get the raw canvas to draw with.
+    canvas = self._canvas.get_raw_canvas()
+
+    # Calculate corner points.
+    p1_x = self._pos_x - self.__width / 2
+    p1_y = self._pos_y - self.__height / 2
+    p2_x = self._pos_x + self.__width / 2
+    p2_y = self._pos_y + self.__height / 2
+
+    self._reference = canvas.create_rectangle(p1_x, p1_y, p2_x, p2_y,
+                                              fill=self._fill,
+                                              outline=self._outline)
