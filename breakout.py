@@ -17,7 +17,7 @@ class BreakoutGame(object):
 
   def __init__(self):
     # Create predictor.
-    self.__predictor = GazePredictor(config.EYE_MODEL)
+    self.__predictor = GazePredictor(config.EYE_MODEL, average_num=1)
 
     # Set up the graphics for the game.
     self.__setup_graphics()
@@ -29,8 +29,13 @@ class BreakoutGame(object):
     # Set the background color.
     self.__canvas.set_background_color(config.BreakoutColors.BG_COLOR)
 
+    # Create the walls.
+    self.__walls = breakout_graphics.Walls(self.__canvas)
     # Create the paddle.
     self.__paddle = breakout_graphics.Paddle(self.__canvas)
+
+    # Draw the graphics.
+    self.__canvas.update()
 
   def run_iter(self):
     """ Runs a single game iteration. """

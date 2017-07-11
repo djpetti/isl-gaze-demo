@@ -3,7 +3,7 @@ SCREEN_WIDTH=1920
 SCREEN_HEIGHT=1070
 
 # Model to use for prediction.
-EYE_MODEL="eye_model.hd5.2"
+EYE_MODEL="eye_model.hd5.3"
 
 # The minimum ratio of eye height to eye width before we consider the eye
 # closed.
@@ -17,3 +17,5 @@ class BreakoutColors(object):
   PADDLE_COLOR="#c84848"
   # Background color.
   BG_COLOR = "#000000"
+  # Static wall color.
+  WALL_COLOR = "#8e8e8e"
