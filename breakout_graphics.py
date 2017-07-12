@@ -1,3 +1,7 @@
+import collections
+
+import numpy as np
+
 import config
 import obj_canvas
 
@@ -10,6 +14,9 @@ class Paddle(object):
     Args:
       canvas: The Canvas to draw the paddle on. """
     self.__canvas = canvas
+
+    # Old position measurements to average with.
+    self.__old_positions = collections.deque()
 
     # Figure out where the paddle will be located.
     paddle_x = config.SCREEN_WIDTH / 2
@@ -29,7 +36,14 @@ class Paddle(object):
     Args:
       new_x: The new x position. """
     _, y_pos = self.__paddle.get_pos()
-    self.__paddle.set_pos(new_x, y_pos)
+
+    # Put it through the averaging filter.
+    self.__old_positions.append(new_x)
+    if len(self.__old_positions) > config.AVERAGE_POINTS:
+      self.__old_positions.popleft()
+    filtered_x = np.mean(self.__old_positions)
+
+    self.__paddle.set_pos(filtered_x, y_pos)
 
   def handle_collision(self, ball):
     """ Handles collisions between the paddle and the ball.

@@ -11,6 +11,10 @@ EYE_OPEN_RATIO = 0.1
 # Minimum confidence before we ignore detections.
 MIN_CONFIDENCE = 0.50
 
+# How many gaze readings to average in the demo. A larger number increases
+# smoothness but decreases responsiveness.
+AVERAGE_POINTS = 10
+
 # Colors for breakout game.
 class BreakoutColors(object):
   # Paddle color.
