@@ -19,3 +19,6 @@ class BreakoutColors(object):
   BG_COLOR = "#000000"
   # Static wall color.
   WALL_COLOR = "#8e8e8e"
+  # Layer colors, in order, from top to bottom.
+  LAYER_COLORS = ["#c84848", "#c84848", "#b47a30", "#b47a30",
+                  "#a2a22a", "#a2a22a", "#48a048", "#48a048"]

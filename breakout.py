@@ -31,6 +31,10 @@ class BreakoutGame(object):
 
     # Create the walls.
     self.__walls = breakout_graphics.Walls(self.__canvas)
+    # Create score box.
+    self.__score_box = breakout_graphics.ScoreBox(self.__canvas)
+    # Create bricks.
+    self.__bricks = breakout_graphics.Bricks(self.__canvas)
     # Create the paddle.
     self.__paddle = breakout_graphics.Paddle(self.__canvas)
 
@@ -63,7 +67,7 @@ class BreakoutGame(object):
 
 def main():
   # Give the user a chance to get in position.
-  collect_main.show_calibration()
+  #collect_main.show_calibration()
 
   # Run the game.
   game = BreakoutGame()
