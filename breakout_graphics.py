@@ -88,6 +88,7 @@ class Walls(object):
     # hits.
     ball.handle_collision(self.__wall_top)
     ball.handle_collision(self.__wall_left)
+    ball.handle_collision(self.__wall_right)
 
 class ScoreBox(object):
   """ Shows the user's score and number of turns remaining. """
@@ -313,6 +314,20 @@ class Brick(object):
                                         fill=self.__color,
                                         outline=self.__color)
 
+  def handle_collision(self, ball):
+    """ Detect and handle a collision between the ball and this brick.
+    Args:
+      ball: The ball we could be colliding with.
+    Returns:
+      True if there was a collision, False otherwise. """
+    coll_x, coll_y = ball.handle_collision(self.__brick)
+    if (coll_x and coll_y):
+      # We have a collision. Remove this brick.
+      self.__brick.delete()
+      return True
+
+    return False
+
 class BrickLayer(object):
   """ Controls a layer of bricks. """
 
@@ -325,9 +340,24 @@ class BrickLayer(object):
     self.__canvas = canvas
 
     # Create individual bricks.
-    self.__bricks = []
+    self.__bricks = set()
     for col in range(0, 10):
-      self.__bricks.append(Brick(self.__canvas, row, col, color))
+      self.__bricks.add(Brick(self.__canvas, row, col, color))
+
+  def handle_collision(self, ball):
+    """ Detect and handle a collision between the ball and this layer.
+    Args:
+      ball: The ball we could be colliding with. """
+    # Check for each brick individually.
+    to_remove = []
+    for brick in self.__bricks:
+      if brick.handle_collision(ball):
+        # The brick was destroyed, so we need to remove it.
+        to_remove.append(brick)
+
+    # Remove destroyed bricks.
+    for brick in to_remove:
+      self.__bricks.remove(brick)
 
 class Bricks(object):
   """ Creates the entire set of bricks. """
@@ -345,6 +375,14 @@ class Bricks(object):
       color = config.BreakoutColors.LAYER_COLORS[row]
 
       self.__layers.append(BrickLayer(self.__canvas, row, color))
+
+  def handle_collision(self, ball):
+    """ Detect and handle a collision between the ball and all the bricks.
+    Args:
+      ball: The ball we could be colliding with. """
+    # Check for each layer individually.
+    for layer in self.__layers:
+      layer.handle_collision(ball)
 
 class Ball(object):
   """ Creates the ball. """

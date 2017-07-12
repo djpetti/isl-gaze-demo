@@ -59,6 +59,7 @@ class BreakoutGame(object):
     # Handle any collision events.
     self.__paddle.handle_collision(self.__ball)
     self.__walls.handle_collision(self.__ball)
+    self.__bricks.handle_collision(self.__ball)
 
     # Update the canvas.
     self.__canvas.update()
@@ -71,7 +72,7 @@ class BreakoutGame(object):
 
 def main():
   # Give the user a chance to get in position.
-  #collect_main.show_calibration()
+  collect_main.show_calibration()
 
   # Run the game.
   game = BreakoutGame()
