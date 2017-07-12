@@ -237,6 +237,10 @@ class ScoreBox(object):
                                         fill=self._color,
                                         outline=self._color)
 
+      # Save these so we can switch them for fives.
+      self._left_rect = left_rect
+      self._right_rect = right_rect
+
       self._shapes.extend([top_rect, mid_rect, bot_rect, left_rect, right_rect])
 
   class Three(_Digit):
@@ -277,6 +281,198 @@ class ScoreBox(object):
 
       self._shapes.extend([back_rect, top_rect, bot_rect])
 
+  class Four(_Digit):
+    """ A four digit. """
+
+    def _draw_digit(self):
+      """ Draws the four digit. """
+      # Calculate the size for rectangular components.
+      top_rect_x = self._pos_x
+      top_rect_y = self._pos_y - self._scale_y * 0.3
+      top_rect_w = self._scale_x
+      top_rect_h = self._scale_y * 0.4
+
+      inner_rect_x = top_rect_x
+      inner_rect_y = self._pos_y - self._scale_y * 0.4
+      inner_rect_w = self._scale_x * 0.6
+      inner_rect_h = self._scale_y * 0.2
+
+      bot_rect_x = self._pos_x + self._scale_x * 0.4
+      bot_rect_y = self._pos_y + self._scale_y * 0.2
+      bot_rect_w = self._scale_x * 0.2
+      bot_rect_h = self._scale_y * 0.6
+
+      # Create rectangles.
+      top_rect = obj_canvas.Rectangle(self._canvas,
+                                      (top_rect_x, top_rect_y),
+                                      (top_rect_w, top_rect_h),
+                                      fill=self._color,
+                                      outline=self._color)
+      inner_rect = obj_canvas.Rectangle(self._canvas,
+                                        (inner_rect_x, inner_rect_y),
+                                        (inner_rect_w, inner_rect_h),
+                                        fill=self._bg_color,
+                                        outline=self._bg_color)
+      bot_rect = obj_canvas.Rectangle(self._canvas,
+                                      (bot_rect_x, bot_rect_y),
+                                      (bot_rect_w, bot_rect_h),
+                                      fill=self._color,
+                                      outline=self._color)
+
+      self._shapes.extend([top_rect, inner_rect, bot_rect])
+
+  class Five(Two):
+    """ A five digit. """
+
+    def _draw_digit(self):
+      # The five is very similar to the two. We just have to flip it.
+      super(ScoreBox.Five, self)._draw_digit()
+
+      # Switch side rectangles.
+      left_pos_x, left_pos_y = self._left_rect.get_pos()
+      right_pos_x, right_pos_y = self._right_rect.get_pos()
+
+      self._left_rect.set_pos(right_pos_x, left_pos_y)
+      self._right_rect.set_pos(left_pos_x, right_pos_y)
+
+  class Six(_Digit):
+    """ A six digit. """
+
+    def _draw_digit(self):
+      # Calculate the size for rectangular components.
+      back_rect_pos = (self._pos_x, self._pos_y)
+      back_rect_size = (self._scale_x, self._scale_y)
+
+      inner_rect_x = self._pos_x
+      inner_rect_y = self._pos_y + self._scale_y * 0.2
+      inner_rect_w = self._scale_x * 0.6
+      inner_rect_h = self._scale_y * 0.2
+
+      top_rect_x = self._pos_x - self._scale_x * 0.1
+      top_rect_y = self._pos_y - self._scale_y * 0.2
+      top_rect_w = self._scale_x * 0.8
+      top_rect_h = self._scale_y * 0.2
+
+      # Create rectangles.
+      back_rect = obj_canvas.Rectangle(self._canvas, back_rect_pos,
+                                       back_rect_size,
+                                       fill=self._color,
+                                       outline=self._color)
+      inner_rect = obj_canvas.Rectangle(self._canvas,
+                                        (inner_rect_x, inner_rect_y),
+                                        (inner_rect_w, inner_rect_h),
+                                        fill=self._bg_color,
+                                        outline=self._bg_color)
+      top_rect = obj_canvas.Rectangle(self._canvas,
+                                      (top_rect_x, top_rect_y),
+                                      (top_rect_w, top_rect_h),
+                                      fill=self._bg_color,
+                                      outline=self._bg_color)
+
+      self._shapes.extend([back_rect, inner_rect, top_rect])
+
+  class Seven(_Digit):
+    """ A seven digit. """
+
+    def _draw_digit(self):
+      # Calculate the size for rectangular components.
+      side_rect_x = self._pos_x + self._scale_x * 0.4
+      side_rect_y = self._pos_y
+      side_rect_w = self._scale_x * 0.2
+      side_rect_h = self._scale_y
+
+      top_rect_x = self._pos_x + self._scale_x * 0.1
+      top_rect_y = self._pos_y - self._scale_y * 0.4
+      top_rect_w = self._scale_x * 0.8
+      top_rect_h = self._scale_y * 0.2
+
+      # Create rectangles.
+      side_rect = obj_canvas.Rectangle(self._canvas,
+                                       (side_rect_x, side_rect_y),
+                                       (side_rect_w, side_rect_h),
+                                       fill=self._color,
+                                       outline=self._color)
+      top_rect = obj_canvas.Rectangle(self._canvas,
+                                      (top_rect_x, top_rect_y),
+                                      (top_rect_w, top_rect_h),
+                                      fill=self._color,
+                                      outline=self._color)
+
+      self._shapes.extend([side_rect, top_rect])
+
+  class Eight(_Digit):
+    """ An eight digit. """
+
+    def _draw_digit(self):
+      # Calculate the size for rectangular components.
+      back_rect_pos = (self._pos_x, self._pos_y)
+      back_rect_size = (self._scale_x, self._scale_y)
+
+      top_rect_x = self._pos_x
+      top_rect_y = self._pos_y - self._scale_y * 0.2
+      top_rect_w = self._scale_x * 0.6
+      top_rect_h = self._scale_y * 0.2
+
+      bot_rect_x = top_rect_x
+      bot_rect_y = self._pos_y + self._scale_y * 0.2
+      bot_rect_w = top_rect_w
+      bot_rect_h = top_rect_h
+
+      # Create rectangles.
+      back_rect = obj_canvas.Rectangle(self._canvas, back_rect_pos,
+                                       back_rect_size,
+                                       fill=self._color,
+                                       outline=self._color)
+      top_rect = obj_canvas.Rectangle(self._canvas,
+                                      (top_rect_x, top_rect_y),
+                                      (top_rect_w, top_rect_h),
+                                      fill=self._bg_color,
+                                      outline=self._bg_color)
+      bot_rect = obj_canvas.Rectangle(self._canvas,
+                                      (bot_rect_x, bot_rect_y),
+                                      (bot_rect_w, bot_rect_h),
+                                      fill=self._bg_color,
+                                      outline=self._bg_color)
+
+      self._shapes.extend([back_rect, top_rect, bot_rect])
+
+  class Nine(_Digit):
+    """ A nine digit. """
+
+    def _draw_digit(self):
+      # Calculate the size for rectangular components.
+      back_rect_pos = (self._pos_x, self._pos_y)
+      back_rect_size = (self._scale_x, self._scale_y)
+
+      top_rect_x = self._pos_x
+      top_rect_y = self._pos_y - self._scale_y * 0.2
+      top_rect_w = self._scale_x * 0.6
+      top_rect_h = self._scale_y * 0.2
+
+      bot_rect_x = self._pos_x - self._scale_x * 0.1
+      bot_rect_y = self._pos_y + self._scale_y * 0.2
+      bot_rect_w = self._scale_x * 0.8
+      bot_rect_h = self._scale_y * 0.2
+
+      # Create rectangles.
+      back_rect = obj_canvas.Rectangle(self._canvas, back_rect_pos,
+                                       back_rect_size,
+                                       fill=self._color,
+                                       outline=self._color)
+      top_rect = obj_canvas.Rectangle(self._canvas,
+                                      (top_rect_x, top_rect_y),
+                                      (top_rect_w, top_rect_h),
+                                      fill=self._bg_color,
+                                      outline=self._bg_color)
+      bot_rect = obj_canvas.Rectangle(self._canvas,
+                                      (bot_rect_x, bot_rect_y),
+                                      (bot_rect_w, bot_rect_h),
+                                      fill=self._bg_color,
+                                      outline=self._bg_color)
+
+      self._shapes.extend([back_rect, top_rect, bot_rect])
+
+
   def __init__(self, canvas):
     """
     Args:
@@ -290,7 +486,7 @@ class ScoreBox(object):
     turn_count_h = config.SCREEN_HEIGHT * 0.08
 
     # Draw the counter.
-    self._turn_count = ScoreBox.Three(self.__canvas,
+    self._turn_count = ScoreBox.Nine(self.__canvas,
                                     (turn_count_x, turn_count_y),
                                     (turn_count_w, turn_count_h))
 
