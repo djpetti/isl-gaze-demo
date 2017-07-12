@@ -15,6 +15,8 @@ MIN_CONFIDENCE = 0.50
 class BreakoutColors(object):
   # Paddle color.
   PADDLE_COLOR="#c84848"
+  # Color of the ball.
+  BALL_COLOR="#c84848"
   # Background color.
   BG_COLOR = "#000000"
   # Static wall color.

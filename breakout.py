@@ -29,14 +29,12 @@ class BreakoutGame(object):
     # Set the background color.
     self.__canvas.set_background_color(config.BreakoutColors.BG_COLOR)
 
-    # Create the walls.
+    # Create graphical elements.
     self.__walls = breakout_graphics.Walls(self.__canvas)
-    # Create score box.
     self.__score_box = breakout_graphics.ScoreBox(self.__canvas)
-    # Create bricks.
     self.__bricks = breakout_graphics.Bricks(self.__canvas)
-    # Create the paddle.
     self.__paddle = breakout_graphics.Paddle(self.__canvas)
+    self.__ball = breakout_graphics.Ball(self.__canvas)
 
     # Draw the graphics.
     self.__canvas.update()
@@ -55,6 +53,12 @@ class BreakoutGame(object):
 
     # Update paddle position.
     self.__paddle.update_position(gaze_x)
+
+    # Update the ball animation.
+    self.__ball.update()
+    # Handle any collision events.
+    self.__paddle.handle_collision(self.__ball)
+    self.__walls.handle_collision(self.__ball)
 
     # Update the canvas.
     self.__canvas.update()

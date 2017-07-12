@@ -31,6 +31,12 @@ class Paddle(object):
     _, y_pos = self.__paddle.get_pos()
     self.__paddle.set_pos(new_x, y_pos)
 
+  def handle_collision(self, ball):
+    """ Handles collisions between the paddle and the ball.
+    Args:
+      ball: The ball that could be colliding. """
+    ball.handle_collision(self.__paddle)
+
 class Walls(object):
   """ This class controls the static walls. """
 
@@ -73,6 +79,15 @@ class Walls(object):
                              (right_wall_w, right_wall_h),
                              fill=wall_color,
                              outline=wall_color)
+
+  def handle_collision(self, ball):
+    """ Handles collisions between the walls and the ball.
+    Args:
+      ball: The ball that could be colliding. """
+    # This is pretty straightforward, because it just needs to bounce when it
+    # hits.
+    ball.handle_collision(self.__wall_top)
+    ball.handle_collision(self.__wall_left)
 
 class ScoreBox(object):
   """ Shows the user's score and number of turns remaining. """
@@ -330,3 +345,75 @@ class Bricks(object):
       color = config.BreakoutColors.LAYER_COLORS[row]
 
       self.__layers.append(BrickLayer(self.__canvas, row, color))
+
+class Ball(object):
+  """ Creates the ball. """
+
+  def __init__(self, canvas, speed=10):
+    """
+    Args:
+      canvas: The canvas to draw the balls on.
+      speed: Base velocity of the ball, in px/s. """
+    self.__canvas = canvas
+
+    # The velocity vector of the ball.
+    self.__vel_x = 1.0
+    self.__vel_y = 1.0
+    self.__vel_mult = speed
+
+    # Keeps track of collision data for other objects.
+    self.__collisions = {}
+
+    # Figure out the ball size.
+    ball_x = config.SCREEN_WIDTH / 2
+    ball_y = config.SCREEN_HEIGHT * 0.6
+    ball_h = config.SCREEN_HEIGHT * 0.015
+    ball_w = ball_h
+
+    # Draw the ball.
+    color = config.BreakoutColors.BALL_COLOR
+    self.__ball = obj_canvas.Rectangle(self.__canvas, (ball_x, ball_y),
+                                       (ball_w, ball_h),
+                                       fill=color,
+                                       outline=color)
+
+  def __animate(self):
+    """ Animate the ball's motion. """
+    move_x = self.__vel_x * self.__vel_mult
+    move_y = self.__vel_y * self.__vel_mult
+
+    self.__ball.move(move_x, move_y)
+
+  def update(self):
+    """ Updates the ball's state. """
+    self.__animate()
+
+  def handle_collision(self, canvas_obj):
+    """ Check for a collision between the ball and another canvas object. It
+    automatically makes the ball bounce.
+    Args:
+      canvas_obj: The canvas object to check for a collision with.
+    Returns
+      A tuple of booleans. The first element indicates whether there is a
+      collision in the x direction, the second indicates whether there is a
+      collision in the y direction. """
+    collision_x, collision_y = \
+        obj_canvas.CanvasObject.check_collision(self.__ball, canvas_obj)
+
+    # Get previous collision data.
+    last_collision_x = False
+    last_collision_y = False
+    if canvas_obj in self.__collisions:
+      last_collision_x, last_collision_y = self.__collisions[canvas_obj]
+    # Update it.
+    self.__collisions[canvas_obj] = (collision_x, collision_y)
+
+    if (collision_x and collision_y):
+      # Bounce the ball. We're going to bounce the direction that most recently
+      # started colliding.
+      if not last_collision_x:
+        self.__vel_x *= -1
+      if not last_collision_y:
+        self.__vel_y *= -1
+
+    return (collision_x, collision_y)
