@@ -6,6 +6,7 @@ import time
 
 import cv2
 
+import config
 import image_cap
 import gaze_points
 
@@ -33,7 +34,7 @@ def main():
   # Set up the video capture.
   cap = image_cap.ImageCap(sys.argv[1])
 
-  control = gaze_points.GazeControl()
+  control = gaze_points.GazeControl(config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
   gaze_point = control.move_dot()
   # Wait for the user's eye to get there.
   time.sleep(1)
