@@ -135,7 +135,7 @@ class ScoreBox(object):
 
     def delete(self):
       """ Delete the digit. """
-      for shape in shapes:
+      for shape in self._shapes:
         shape.delete()
 
   class Zero(_Digit):
@@ -486,9 +486,51 @@ class ScoreBox(object):
     turn_count_h = config.SCREEN_HEIGHT * 0.08
 
     # Draw the counter.
-    self._turn_count = ScoreBox.Nine(self.__canvas,
-                                    (turn_count_x, turn_count_y),
-                                    (turn_count_w, turn_count_h))
+    self.__turn_count = 3
+    self.__disp_turns = None
+    self.__update_turn_count()
+
+  def __get_digit(self, digit):
+    """ A helper function that selects the correct digit class for a number.
+    Args:
+      digit: The number, between 0 and 9.
+    Returns:
+      The digit class. """
+    lut = [ScoreBox.Zero, ScoreBox.One, ScoreBox.Two, ScoreBox.Three,
+           ScoreBox.Four, ScoreBox.Five, ScoreBox.Six, ScoreBox.Seven,
+           ScoreBox.Eight, ScoreBox.Nine]
+    return lut[digit]
+
+  def __update_turn_count(self):
+    """ Update the displayed turn counter. """
+    if self.__disp_turns:
+      # Delete the previous number.
+      self.__disp_turns.delete()
+
+    # Calculate position and size for turn counter.
+    turn_count_x = config.SCREEN_WIDTH * 0.75
+    turn_count_y = config.SCREEN_HEIGHT * 0.05
+    turn_count_w = config.SCREEN_WIDTH * 0.05
+    turn_count_h = config.SCREEN_HEIGHT * 0.08
+
+    # Draw it.
+    digit = self.__get_digit(self.__turn_count)
+    self.__disp_turns = digit(self.__canvas,
+                              (turn_count_x, turn_count_y),
+                              (turn_count_w, turn_count_h))
+
+  def decrement_turns(self):
+    """ Decrements the number of turns a user has.
+    Returns:
+      True if the user had a turn, False if there were none left. """
+    if not self.__turn_count:
+      # Out of turns.
+      return False
+
+    self.__turn_count -= 1
+    self.__update_turn_count()
+
+    return True
 
 class Brick(object):
   """ Controls a single brick. """
@@ -613,14 +655,15 @@ class Ball(object):
     self.__collisions = {}
 
     # Figure out the ball size.
-    ball_x = config.SCREEN_WIDTH / 2
-    ball_y = config.SCREEN_HEIGHT * 0.6
+    self.__ball_x = config.SCREEN_WIDTH / 2
+    self.__ball_y = config.SCREEN_HEIGHT * 0.6
     ball_h = config.SCREEN_HEIGHT * 0.015
     ball_w = ball_h
 
     # Draw the ball.
     color = config.BreakoutColors.BALL_COLOR
-    self.__ball = obj_canvas.Rectangle(self.__canvas, (ball_x, ball_y),
+    self.__ball = obj_canvas.Rectangle(self.__canvas,
+                                       (self.__ball_x, self.__ball_y),
                                        (ball_w, ball_h),
                                        fill=color,
                                        outline=color)
@@ -676,3 +719,11 @@ class Ball(object):
       return True
 
     return False
+
+  def reset(self):
+    """ Resets the ball to its starting position. """
+    self.__ball.set_pos(self.__ball_x, self.__ball_y)
+
+    # Reset velocity.
+    self.__vel_x = 1.0
+    self.__vel_y = 1.0

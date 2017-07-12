@@ -65,7 +65,11 @@ class BreakoutGame(object):
 
     if self.__ball.dropped():
       # The user missed the ball.
-      return False
+      if not self.__score_box.decrement_turns():
+        # Game over.
+        return False
+      # Start a new turn.
+      self.__ball.reset()
 
     # Update the canvas.
     self.__canvas.update()
