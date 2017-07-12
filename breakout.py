@@ -40,12 +40,14 @@ class BreakoutGame(object):
     self.__canvas.update()
 
   def run_iter(self):
-    """ Runs a single game iteration. """
+    """ Runs a single game iteration.
+    Returns:
+      True while the game is in progress, False when it's over. """
     # Get a new gaze prediction.
     gaze_x, gaze_y = self.__predictor.predict_gaze()
     if (gaze_x == -1 and gaze_y == -1):
       # The prediction failed, so we can't update.
-      return
+      return True
 
     # Convert to screen coordinates.
     gaze_x *= config.SCREEN_WIDTH
@@ -61,13 +63,19 @@ class BreakoutGame(object):
     self.__walls.handle_collision(self.__ball)
     self.__bricks.handle_collision(self.__ball)
 
+    if self.__ball.dropped():
+      # The user missed the ball.
+      return False
+
     # Update the canvas.
     self.__canvas.update()
 
+    return True
+
   def run(self):
     """ Runs an entire game. """
-    while True:
-      self.run_iter()
+    while self.run_iter():
+      pass
 
 
 def main():

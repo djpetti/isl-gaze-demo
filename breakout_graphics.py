@@ -469,3 +469,14 @@ class Ball(object):
         self.__vel_y *= -1
 
     return (collision_x, collision_y)
+
+  def dropped(self):
+    """ Detects whether the ball dropped.
+    Returns:
+      True if it did, False otherwise. """
+    _, y_pos = self.__ball.get_pos()
+    if y_pos > config.SCREEN_HEIGHT:
+      # It dropped.
+      return True
+
+    return False
