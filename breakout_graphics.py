@@ -1,4 +1,5 @@
 import collections
+import random
 
 import numpy as np
 
@@ -702,7 +703,7 @@ class Bricks(object):
 class Ball(object):
   """ Creates the ball. """
 
-  def __init__(self, canvas, speed=10):
+  def __init__(self, canvas, speed=20):
     """
     Args:
       canvas: The canvas to draw the balls on.
@@ -710,8 +711,7 @@ class Ball(object):
     self.__canvas = canvas
 
     # The velocity vector of the ball.
-    self.__vel_x = 1.0
-    self.__vel_y = 1.0
+    self.__choose_velocity()
     self.__vel_mult = speed
 
     # Keeps track of collision data for other objects.
@@ -737,6 +737,11 @@ class Ball(object):
     move_y = self.__vel_y * self.__vel_mult
 
     self.__ball.move(move_x, move_y)
+
+  def __choose_velocity(self):
+    """ Chooses a random starting velocity for the ball. """
+    self.__vel_x = (random.random() + 0.7) % 1.0
+    self.__vel_y = 1 - self.__vel_x
 
   def update(self):
     """ Updates the ball's state. """
@@ -786,7 +791,5 @@ class Ball(object):
   def reset(self):
     """ Resets the ball to its starting position. """
     self.__ball.set_pos(self.__ball_x, self.__ball_y)
-
     # Reset velocity.
-    self.__vel_x = 1.0
-    self.__vel_y = 1.0
+    self.__choose_velocity()
