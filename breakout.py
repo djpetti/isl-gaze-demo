@@ -61,7 +61,11 @@ class BreakoutGame(object):
     # Handle any collision events.
     self.__paddle.handle_collision(self.__ball)
     self.__walls.handle_collision(self.__ball)
-    self.__bricks.handle_collision(self.__ball)
+    points = self.__bricks.handle_collision(self.__ball)
+
+    # Update the score.
+    if points:
+      self.__score_box.increase_score(points)
 
     if self.__ball.dropped():
       # The user missed the ball.

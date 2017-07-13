@@ -3,7 +3,7 @@ SCREEN_WIDTH=1920
 SCREEN_HEIGHT=1070
 
 # Model to use for prediction.
-EYE_MODEL="eye_model.hd5.3"
+EYE_MODEL="eye_model.hd5.4"
 
 # The minimum ratio of eye height to eye width before we consider the eye
 # closed.
@@ -14,6 +14,9 @@ MIN_CONFIDENCE = 0.50
 # How many gaze readings to average in the demo. A larger number increases
 # smoothness but decreases responsiveness.
 AVERAGE_POINTS = 10
+
+# Number of points awarded for each row. They are in order from top to bottom.
+ROW_POINTS = [7, 7, 5, 5, 3, 3, 1, 1]
 
 # Colors for breakout game.
 class BreakoutColors(object):

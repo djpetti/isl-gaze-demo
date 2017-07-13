@@ -490,6 +490,13 @@ class ScoreBox(object):
     self.__disp_turns = None
     self.__update_turn_count()
 
+    # Draw the score.
+    self.__score = 0
+    self.__ones_digit = None
+    self.__tens_digit = None
+    self.__hundreds_digit = None
+    self.__update_score()
+
   def __get_digit(self, digit):
     """ A helper function that selects the correct digit class for a number.
     Args:
@@ -519,6 +526,41 @@ class ScoreBox(object):
                               (turn_count_x, turn_count_y),
                               (turn_count_w, turn_count_h))
 
+  def __update_score(self):
+    """ Updates the displayed score. """
+    # Calculate position and size of score digits.
+    score_right_x = config.SCREEN_WIDTH * 0.62
+    score_mid_x = config.SCREEN_WIDTH * 0.55
+    score_left_x = config.SCREEN_WIDTH * 0.48
+    score_y = config.SCREEN_HEIGHT * 0.05
+
+    score_w = config.SCREEN_WIDTH * 0.05
+    score_h = config.SCREEN_HEIGHT * 0.08
+
+    # Draw hundreds digit.
+    if self.__hundreds_digit:
+      self.__hundreds_digit.delete()
+    digit = self.__get_digit(self.__score / 100)
+    self.__hundreds_digit = digit(self.__canvas,
+                                  (score_left_x, score_y),
+                                  (score_w, score_h))
+
+    # Draw tens digit.
+    if self.__tens_digit:
+      self.__tens_digit.delete()
+    digit = self.__get_digit((self.__score % 100) / 10)
+    self.__tens_digit = digit(self.__canvas,
+                              (score_mid_x, score_y),
+                              (score_w, score_h))
+
+    # Draw ones digit.
+    if self.__ones_digit:
+      self.__ones_digit.delete()
+    digit = self.__get_digit(self.__score % 10)
+    self.__ones_digit = digit(self.__canvas,
+                              (score_right_x, score_y),
+                              (score_w, score_h))
+
   def decrement_turns(self):
     """ Decrements the number of turns a user has.
     Returns:
@@ -531,6 +573,11 @@ class ScoreBox(object):
     self.__update_turn_count()
 
     return True
+
+  def increase_score(self, amount):
+    """ Increase the user's score by a given amount. """
+    self.__score += amount
+    self.__update_score()
 
 class Brick(object):
   """ Controls a single brick. """
@@ -590,6 +637,7 @@ class BrickLayer(object):
       row: Which row the layer is, with row 0 being the top.
       color: The color of the layer. """
     self.__canvas = canvas
+    self.__row = row
 
     # Create individual bricks.
     self.__bricks = set()
@@ -599,17 +647,26 @@ class BrickLayer(object):
   def handle_collision(self, ball):
     """ Detect and handle a collision between the ball and this layer.
     Args:
-      ball: The ball we could be colliding with. """
+      ball: The ball we could be colliding with.
+    Returns:
+      The number of points that should be awarded, or zero if there was no
+      collision. """
     # Check for each brick individually.
     to_remove = []
+    points = 0
     for brick in self.__bricks:
       if brick.handle_collision(ball):
         # The brick was destroyed, so we need to remove it.
         to_remove.append(brick)
 
+        # Look up the number of points we got.
+        points = config.ROW_POINTS[self.__row]
+
     # Remove destroyed bricks.
     for brick in to_remove:
       self.__bricks.remove(brick)
+
+    return points
 
 class Bricks(object):
   """ Creates the entire set of bricks. """
@@ -631,10 +688,16 @@ class Bricks(object):
   def handle_collision(self, ball):
     """ Detect and handle a collision between the ball and all the bricks.
     Args:
-      ball: The ball we could be colliding with. """
+      ball: The ball we could be colliding with.
+    Returns:
+      The number of points that should be awarded, or 0 if there was no
+      collision. """
     # Check for each layer individually.
+    points = 0
     for layer in self.__layers:
-      layer.handle_collision(ball)
+      points += layer.handle_collision(ball)
+
+    return points
 
 class Ball(object):
   """ Creates the ball. """
