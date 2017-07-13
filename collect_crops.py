@@ -37,7 +37,7 @@ def main():
   in_dir = sys.argv[1]
   out_dir = sys.argv[2]
   # Which session will become testing data.
-  test_session = sys.argv[3]
+  test_sessions = sys.argv[3:]
 
   # Make training and testing directories.
   train_dir = os.path.join(out_dir, "train")
@@ -57,7 +57,7 @@ def main():
       # Extraneous item.
       continue
 
-    if session == test_session:
+    if session in test_sessions:
       # This is our test session.
       copy_session(session_path, test_dir)
       found_test = True
