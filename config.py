@@ -17,6 +17,8 @@ AVERAGE_POINTS = 10
 
 # Number of points awarded for each row. They are in order from top to bottom.
 ROW_POINTS = [7, 7, 5, 5, 3, 3, 1, 1]
+# How much to speed up by each time a brick is cleared.
+SPEED_INCREASE = 0.5
 
 # Colors for breakout game.
 class BreakoutColors(object):

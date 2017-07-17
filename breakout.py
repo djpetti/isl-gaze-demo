@@ -66,6 +66,8 @@ class BreakoutGame(object):
     # Update the score.
     if points:
       self.__score_box.increase_score(points)
+      # Increase the ball speed.
+      self.__ball.increase_speed()
 
     if self.__ball.dropped():
       # The user missed the ball.

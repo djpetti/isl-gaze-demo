@@ -12,6 +12,7 @@ class EyeCropper:
   def __init__(self):
     # Landmark detector to use henceforth.
     self.__detector = ld.LandmarkDetection()
+    self.__pose = ld.PoseEstimation()
 
     # The last detection flag.
     self.__detect_flag = 1
@@ -56,10 +57,15 @@ class EyeCropper:
       self.__points, self.__detect_flag, confidence = \
           self.__detector.ffp_track(image, self.__points)
 
-    print confidence
     if confidence < config.MIN_CONFIDENCE:
       # Not a good detection.
       return None
 
     # Crop the left eye.
     return self.__crop_left_eye(image, self.__points)
+
+  def estimate_pose(self):
+    """ Returns the head pose estimate for the last image it cropped.
+    Returns:
+      A matrix with pitch, yaw, and roll. """
+    return self.__pose.weakIterative_Occlusion(self.__points)

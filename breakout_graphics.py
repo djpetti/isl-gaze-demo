@@ -793,3 +793,7 @@ class Ball(object):
     self.__ball.set_pos(self.__ball_x, self.__ball_y)
     # Reset velocity.
     self.__choose_velocity()
+
+  def increase_speed(self):
+    """ Increases speed of the ball as the game progresses. """
+    self.__vel_mult += config.SPEED_INCREASE
