@@ -77,10 +77,11 @@ def convert_labels(labels):
   Args:
     labels: The labels to convert.
   Returns:
-    The converted labels. """
+    The converted label gaze points, and poses. """
   num_labels = []
+  poses = []
   for label in labels:
-    coords = label.split("_")[0]
+    coords, pitch, yaw, roll = label.split("_")[:4]
     x_pos, y_pos = coords.split("x")
     x_pos = float(x_pos)
     y_pos = float(y_pos)
@@ -91,8 +92,17 @@ def convert_labels(labels):
 
     num_labels.append([x_pos, y_pos])
 
+    # Convert poses.
+    pitch = float(pitch)
+    yaw = float(yaw)
+    roll = float(roll)
+
+    poses.append([pitch, yaw, roll])
+
   stack = np.stack(num_labels, axis=0)
-  return stack
+  pose_stack = np.stack(poses, axis=0)
+
+  return (stack, pose_stack)
 
 def distance_metric(y_true, y_pred):
   """ Calculates the euclidean distance between the two labels and the
@@ -130,7 +140,7 @@ def build_network():
     The built network, ready to train. """
   #input_shape = (patch_shape[0], patch_shape[1], image_shape[2])
   input_shape = (patch_shape[0], patch_shape[1], 1)
-  inputs = layers.Input(shape=input_shape)
+  inputs = layers.Input(shape=input_shape, name="main_input")
 
   floats = K.cast(inputs, "float32")
 
@@ -155,13 +165,23 @@ def build_network():
 
   values = layers.Flatten()(values)
 
+  # Head pose input.
+  pose_input = layers.Input(shape=(3,), name="pose_input")
+  pose_values = layers.Dense(50, activation="relu")(pose_input)
+  pose_values = layers.BatchNormalization()(pose_values)
+
+  pose_values = layers.Dense(50, activation="relu")(pose_values)
+  pose_values = layers.BatchNormalization()(pose_values)
+
+  values = layers.concatenate([values, pose_values])
+
   values = layers.Dense(256, activation="relu")(values)
   values = layers.BatchNormalization()(values)
   values = layers.Dense(128, activation="relu")(values)
   values = layers.BatchNormalization()(values)
   predictions = layers.Dense(2, activation="linear")(values)
 
-  model = Model(inputs=inputs, outputs=predictions)
+  model = Model(inputs=[inputs, pose_input], outputs=predictions)
   rmsprop = optimizers.RMSprop(decay=decay)
   model.compile(optimizer=rmsprop, loss=distance_metric,
                 metrics=[accuracy_metric])
@@ -199,10 +219,10 @@ def main():
     training_data = np.expand_dims(training_data, 3)
     training_data = training_data.astype(np.float32)
     training_data /= np.std(training_data)
-    training_labels = convert_labels(training_labels)
+    training_labels, pose_data = convert_labels(training_labels)
 
     # Train the model.
-    history = model.fit(training_data,
+    history = model.fit([training_data, pose_data],
                         training_labels,
                         epochs=1,
               					batch_size=batch_size)
@@ -215,8 +235,9 @@ def main():
       testing_data = np.expand_dims(testing_data, 3)
       testing_data = testing_data.astype(np.float32)
       testing_data /= np.std(testing_data)
-      testing_labels = convert_labels(testing_labels)
-      loss, accuracy = model.evaluate(testing_data, testing_labels,
+      testing_labels, pose_data = convert_labels(testing_labels)
+
+      loss, accuracy = model.evaluate([testing_data, pose_data], testing_labels,
                                       batch_size=batch_size)
 
       print "Loss: %f, Accuracy: %f" % (loss, accuracy)
