@@ -167,7 +167,10 @@ def build_network():
 
   # Head pose input.
   pose_input = layers.Input(shape=(3,), name="pose_input")
-  pose_values = layers.Dense(50, activation="relu")(pose_input)
+  pose_values = layers.Dense(100, activation="relu")(pose_input)
+  pose_values = layers.BatchNormalization()(pose_values)
+
+  pose_values = layers.Dense(50, activation="relu")(pose_values)
   pose_values = layers.BatchNormalization()(pose_values)
 
   pose_values = layers.Dense(50, activation="relu")(pose_values)
