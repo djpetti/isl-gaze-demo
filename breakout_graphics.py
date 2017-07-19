@@ -740,7 +740,7 @@ class Ball(object):
 
   def __choose_velocity(self):
     """ Chooses a random starting velocity for the ball. """
-    self.__vel_x = (random.random() + 0.2) % 0.5
+    self.__vel_x = random.randint(400, 600) / 1000.0
     self.__vel_y = 1 - self.__vel_x
 
   def update(self):
