@@ -23,6 +23,19 @@ def should_ignore(image_name):
 
   return image_num < 5
 
+def make_pose_filename(image_file, pose):
+  """ Adds the pose into the image filename.
+  Args:
+    image_file: The base name of the image.
+    pose: The pose matrix for the image. """
+  pitch, yaw, roll = pose
+
+  # Add it after the gaze location.
+  pre_gaze, post_gaze = image_file.split("_", 1)
+  new_name = "%s_%f_%f_%f_%s" % (pre_gaze, pitch, yaw, roll, post_gaze)
+
+  return new_name
+
 def crop_dir(cropper, in_dir, out_dir):
   """ Crops an entire directory worth of images.
   Args:
@@ -48,6 +61,11 @@ def crop_dir(cropper, in_dir, out_dir):
       # Cropping failed.
       print("WARNING: Failed to crop '%s'." % (image_file))
       continue
+
+    # Extract the pose.
+    pose = cropper.estimate_pose()
+    # Add the pose into the image name.
+    image_file = make_pose_filename(image_file, pose)
 
     # Save the image.
     out_path = os.path.join(out_dir, image_file)

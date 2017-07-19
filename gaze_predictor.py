@@ -55,11 +55,16 @@ class GazePredictor:
       failed to predict the gaze. """
     # Get the input images.
     image_batch = []
+    pose_batch = []
     for _ in range(0, self.__average_num):
       eye_crop = self.__capture_eye()
       if eye_crop is None:
         # We failed to get an image.
         continue
+
+      # Get the current head pose.
+      pose = self.__cropper.estimate_pose()
+      pose_batch.append(pose)
 
       # Convert to black and white.
       eye_crop = cv2.cvtColor(eye_crop, cv2.COLOR_BGR2GRAY)
@@ -74,13 +79,16 @@ class GazePredictor:
     # Generate a prediction.
     image_batch = np.stack(image_batch)
     image_batch = np.expand_dims(image_batch, -1)
+    pose_batch = np.stack(pose_batch)
+    pose_batch = pose_batch[:, :, 0]
+    print pose_batch
 
     # Do same pre-processing.
     image_batch = image_batch.astype(np.float32)
     image_batch -= 99
     image_batch /= np.std(image_batch)
 
-    raw_preds = self.__predictor.predict(image_batch,
+    raw_preds = self.__predictor.predict([image_batch, pose_batch],
                                          batch_size=len(image_batch))
 
     # Average all the predictions to generate a final one.
