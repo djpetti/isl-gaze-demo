@@ -34,8 +34,8 @@ class GazePredictor(object):
 
   def __del__(self):
     # Make sure internal processes have terminated.
-    del self.__capture_process
-    del self.__prediction_process
+    self.__capture_process.release()
+    self.__prediction_process.release()
 
   def predict_gaze(self):
     """ Predicts the user's gaze based on current frames.
@@ -63,8 +63,8 @@ class _CnnProcess(object):
     self.__process = Process(target=self.__predict_forever)
     self.__process.start()
 
-  def __del__(self):
-    # Terminate internal process.
+  def release(self):
+    """ Cleans up and terminates internal process. """
     self.__process.terminate()
 
   def __predict_forever(self):
@@ -143,8 +143,8 @@ class _LandmarkProcess(object):
     self.__process = Process(target=self.__capture_forever)
     self.__process.start()
 
-  def __del__(self):
-    # Terminate internal process.
+  def release(self):
+    """ Cleans up and terminates internal process. """
     self.__process.terminate()
 
   def __capture_eye(self):

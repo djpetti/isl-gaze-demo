@@ -1,8 +1,9 @@
 #!/usr/bin/python
 
 
-from gaze_predictor import GazePredictor
+from Tkinter import TclError
 
+from gaze_predictor import GazePredictor
 import breakout_graphics
 import collect_main
 import config
@@ -84,7 +85,11 @@ class BreakoutGame(object):
 
   def run(self):
     """ Runs an entire game. """
-    while self.run_iter():
+    try:
+      while self.run_iter():
+        pass
+    except TclError:
+      # The user closed it.
       pass
 
 
