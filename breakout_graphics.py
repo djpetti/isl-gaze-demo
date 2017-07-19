@@ -797,3 +797,40 @@ class Ball(object):
   def increase_speed(self):
     """ Increases speed of the ball as the game progresses. """
     self.__vel_mult += config.SPEED_INCREASE
+
+class LoadScreen(object):
+  """ Shows a loading screen. """
+
+  def __init__(self, canvas):
+    """
+    Args:
+      canvas: The canvas to draw it on. """
+    self.__canvas = canvas
+
+    # Calculate positions.
+    dot_l_x = config.SCREEN_WIDTH * 0.45
+    dot_m_x = config.SCREEN_WIDTH * 0.5
+    dot_r_x = config.SCREEN_WIDTH * 0.55
+    dot_y = config.SCREEN_HEIGHT * 0.5
+
+    dot_w = config.SCREEN_WIDTH * 0.02
+    dot_h = dot_w
+
+    color = config.BreakoutColors.WALL_COLOR
+
+    # Draw dots.
+    self.__dot_l = obj_canvas.Rectangle(self.__canvas, (dot_l_x, dot_y),
+                                        (dot_w, dot_h), fill=color)
+    self.__dot_m = obj_canvas.Rectangle(self.__canvas, (dot_m_x, dot_y),
+                                        (dot_w, dot_h), fill=color)
+    self.__dot_r = obj_canvas.Rectangle(self.__canvas, (dot_r_x, dot_y),
+                                        (dot_w, dot_h), fill=color)
+
+    # Make sure it's displayed.
+    self.__canvas.update()
+
+  def clear(self):
+    """ Clears the loading screen and prepares for the game. """
+    self.__dot_l.delete()
+    self.__dot_m.delete()
+    self.__dot_r.delete()

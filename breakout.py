@@ -30,6 +30,13 @@ class BreakoutGame(object):
     # Set the background color.
     self.__canvas.set_background_color(config.BreakoutColors.BG_COLOR)
 
+    # Show the loading screen initially.
+    load_screen = breakout_graphics.LoadScreen(self.__canvas)
+    # Wait until the gaze predictions are ready.
+    self.__predictor.predict_gaze()
+    # Start the game.
+    load_screen.clear()
+
     # Create graphical elements.
     self.__walls = breakout_graphics.Walls(self.__canvas)
     self.__score_box = breakout_graphics.ScoreBox(self.__canvas)
