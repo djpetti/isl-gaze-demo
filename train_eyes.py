@@ -54,7 +54,7 @@ image_shape = (36, 60, 3)
 patch_shape = (26, 56)
 
 # How many iterations to train for.
-iterations = 500
+iterations = 600
 
 # Learning rate hyperparameters.
 learning_rate = 0.01
@@ -71,17 +71,49 @@ dataset_files = "data/daniel_myelin/dataset"
 cache_dir = "data/daniel_myelin"
 
 
+def _create_bitmask_image(x1, y1, x2, y2):
+  """ Creates the bitmask image from the bbox points.
+  Args:
+    x1, y1: The x and y coordinates of the first point, in frame fractions.
+    x2, y2: The x and y coordinates of the second point, in frame fractions.
+  Returns:
+    The generated bitmask image. """
+  # Scale to mask size.
+  x1 *= 25
+  y1 *= 25
+  x2 *= 25
+  y2 *= 25
+
+  x1 = int(x1)
+  y1 = int(y1)
+  x2 = int(x2)
+  y2 = int(y2)
+
+  # Create the interior image.
+  width = x2 - x1
+  height = y2 - y1
+  face_box = np.ones((height, width))
+
+  # Create the background.
+  frame = np.zeros((25, 25))
+  # Superimpose it correctly.
+  frame[y1:y2, x1:x2] = face_box
+
+  return frame
+
+
 def convert_labels(labels):
   """ Convert the raw labels from the dataset into matrices that can be fed into
   the loss function.
   Args:
     labels: The labels to convert.
   Returns:
-    The converted label gaze points, and poses. """
+    The converted label gaze points, poses, and face masks. """
   num_labels = []
   poses = []
+  face_masks = []
   for label in labels:
-    coords, pitch, yaw, roll = label.split("_")[:4]
+    coords, pitch, yaw, roll, x1, y1, x2, y2 = label.split("_")[:8]
     x_pos, y_pos = coords.split("x")
     x_pos = float(x_pos)
     y_pos = float(y_pos)
@@ -99,10 +131,20 @@ def convert_labels(labels):
 
     poses.append([pitch, yaw, roll])
 
+    # Convert bitmask.
+    x1 = float(x1)
+    y1 = float(y1)
+    x2 = float(x2)
+    y2 = float(y2)
+
+    face_mask = _create_bitmask_image(x1, y1, x2, y2)
+    face_masks.append(face_mask)
+
   stack = np.stack(num_labels, axis=0)
   pose_stack = np.stack(poses, axis=0)
+  face_stack = np.stack(face_masks, axis=0)
 
-  return (stack, pose_stack)
+  return (stack, pose_stack, face_stack)
 
 def distance_metric(y_true, y_pred):
   """ Calculates the euclidean distance between the two labels and the
@@ -176,7 +218,22 @@ def build_network():
   pose_values = layers.Dense(50, activation="relu")(pose_values)
   pose_values = layers.BatchNormalization()(pose_values)
 
-  values = layers.concatenate([values, pose_values])
+  # Face mask input.
+  mask_input = layers.Input(shape=(25, 25), name="mask_input")
+
+  # We have to flatten the masks before we can use them in the FF layers.
+  mask_values = layers.Flatten()(mask_input)
+
+  mask_values = layers.Dense(100, activation="relu")(mask_values)
+  mask_values = layers.BatchNormalization()(mask_values)
+
+  mask_values = layers.Dense(50, activation="relu")(mask_values)
+  mask_values = layers.BatchNormalization()(mask_values)
+
+  mask_values = layers.Dense(50, activation="relu")(mask_values)
+  mask_values = layers.BatchNormalization()(mask_values)
+
+  values = layers.concatenate([values, pose_values, mask_values])
 
   values = layers.Dense(256, activation="relu")(values)
   values = layers.BatchNormalization()(values)
@@ -184,7 +241,7 @@ def build_network():
   values = layers.BatchNormalization()(values)
   predictions = layers.Dense(2, activation="linear")(values)
 
-  model = Model(inputs=[inputs, pose_input], outputs=predictions)
+  model = Model(inputs=[inputs, pose_input, mask_input], outputs=predictions)
   rmsprop = optimizers.RMSprop(decay=decay)
   model.compile(optimizer=rmsprop, loss=distance_metric,
                 metrics=[accuracy_metric])
@@ -222,10 +279,11 @@ def main():
     training_data = np.expand_dims(training_data, 3)
     training_data = training_data.astype(np.float32)
     training_data /= np.std(training_data)
-    training_labels, pose_data = convert_labels(training_labels)
+    training_labels, pose_data, mask_data = convert_labels(training_labels)
+    #mask_data = np.zeros(mask_data.shape)
 
     # Train the model.
-    history = model.fit([training_data, pose_data],
+    history = model.fit([training_data, pose_data, mask_data],
                         training_labels,
                         epochs=1,
               					batch_size=batch_size)
@@ -238,9 +296,11 @@ def main():
       testing_data = np.expand_dims(testing_data, 3)
       testing_data = testing_data.astype(np.float32)
       testing_data /= np.std(testing_data)
-      testing_labels, pose_data = convert_labels(testing_labels)
+      testing_labels, pose_data, mask_data = convert_labels(testing_labels)
+      #mask_data = np.zeros(mask_data.shape)
 
-      loss, accuracy = model.evaluate([testing_data, pose_data], testing_labels,
+      loss, accuracy = model.evaluate([testing_data, pose_data, mask_data],
+                                      testing_labels,
                                       batch_size=batch_size)
 
       print "Loss: %f, Accuracy: %f" % (loss, accuracy)
