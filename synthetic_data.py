@@ -2,6 +2,8 @@ import random
 
 import numpy as np
 
+import cv2
+
 import config
 
 def _unit_vector(vector):
@@ -48,6 +50,7 @@ def _compute_view_bounds(fov, screen_size, z_dist, cam_offset):
   Returns:
     The mininum and maximum centimeter coordinates that the camera can see to.
   """
+  print "(%f, %f, %f, %f)" % (fov, screen_size, z_dist, cam_offset)
   cam_view = z_dist * np.tan(fov / 2)
   max_cam = (screen_size / 2) + cam_view
   min_cam = (screen_size / 2) - cam_view
@@ -75,6 +78,7 @@ def _compute_head_pos_bounds(gaze_vec, z_dist, min_distance, max_gaze,
     to make this work. It will return (None, None, None) if it can't find a
     solution. """
   fov = config.Camera.CAMERA_FOV[dimension]
+  camera_pos = config.Camera.CAMERA_POS[dimension]
 
   # Project gaze vector onto the xz or yz plane.
   gaze_planar = np.array([gaze_vec[dimension], gaze_vec[2]])
@@ -87,8 +91,9 @@ def _compute_head_pos_bounds(gaze_vec, z_dist, min_distance, max_gaze,
     min_head_gaze = -(max_gaze - max_head_gaze)
 
     # Figure out the edges of what the camera can see at this distance.
-    camera_pos = config.Camera.CAMERA_POS[dimension]
     min_cam, max_cam = _compute_view_bounds(fov, max_gaze, z_dist, camera_pos)
+    print "View dims: %d, (%f, %f)" % (dimension, min_cam, max_cam)
+
 
     # Figure out where our head must be to be completely visible.
     max_head_cam = max_cam - (face_size / 2)
@@ -101,10 +106,15 @@ def _compute_head_pos_bounds(gaze_vec, z_dist, min_distance, max_gaze,
     if max_head < min_head:
       # We're in an unsolvable situation. Try moving the head inward and see if
       # we can fix it.
+      if z_dist == min_distance:
+        # There's probably no way to make this work. Resort to allowing
+        # out-of-bounds gaze points.
+        return (min_head_cam, max_head_cam, z_dist)
+
       z_dist /= 2.0
       if z_dist < min_distance:
-        # There's probably now way to make this work. Give up.
-        return (None, None, None)
+        # Try once at the minimum distance.
+        z_dist = min_distance
 
     else:
       # It's good.
@@ -170,7 +180,7 @@ def _compute_random_head_pos(gaze_vec, head_pose, face_size):
     face_size: The size of the face, in cm, in the form (width, height).
   Returns:
     A tuple containing the location of the head in 3D space in the form
-    [x, y, z]. All three elements will be None if this condition is unsolvable. """
+    [x, y, z]. """
   face_width, face_height = face_size
 
   # Bound the distance from the camera by when we fill up the frame.
@@ -188,15 +198,25 @@ def _compute_random_head_pos(gaze_vec, head_pose, face_size):
                                                   min_distance,
                                                   config.SCREEN_WIDTH_CM,
                                                   face_width, 0)
+  z_dist_dim1 = z_dist
   if z_dist == None:
     # Unsolvable.
     return (None, None, None)
+
   min_y, max_y, z_dist = _compute_head_pos_bounds(gaze_vec, z_dist,
                                                   min_distance,
                                                   config.SCREEN_HEIGHT_CM,
                                                   face_height, 1)
   if z_dist == None:
     return (None, None, None)
+  if z_dist != z_dist_dim1:
+    # The calculation for the second dimension decreased the z_dist, so we have
+    # to go back and recompute the first one.
+    min_x, max_x, z_dist = _compute_head_pos_bounds(gaze_vec, z_dist,
+                                                    min_distance,
+                                                    config.SCREEN_WIDTH_CM,
+                                                    face_width, 0)
+
 
   # Pick x and y positions for the head.
   x_dist = random.uniform(min_x, max_x)
@@ -209,16 +229,14 @@ def compute_gaze_and_head_box(gaze_vec, head_pose):
   in space, and computes the resulting gaze point.
   Returns:
     The gaze point on the screen, as well as the head bounding box, both in
-    screen units, or (None, None) if unsolvable. """
+    screen units. It will try its best to put the gaze point on-screen, but
+    sometimes it can't. """
   # Determine randomized face size.
   face_size = _compute_face_size()
 
   # Determine a position for the head.
   head_x, head_y, head_z = _compute_random_head_pos(gaze_vec, head_pose,
                                                     face_size)
-  if not head_x:
-    # Unsolvable.
-    return (None, None)
 
   # Compute the actual gaze point based on the head position.
   gaze_vec_xz = np.array([gaze_vec[0], gaze_vec[2]])
@@ -245,3 +263,25 @@ def compute_gaze_and_head_box(gaze_vec, head_pose):
                                     head_pose, (fov_w, fov_h))
 
   return ((gaze_x, gaze_y), mask_points)
+
+def display_frame(point1, point2):
+  p1_x, p1_y = point1
+  p2_x, p2_y = point2
+  frame = np.zeros((480, 640))
+
+  p1_x *= 640
+  p2_x *= 640
+  p1_y *= 480
+  p2_y *= 480
+
+  p1_x = int(p1_x)
+  p1_y = int(p1_y)
+  p2_x = int(p2_x)
+  p2_y = int(p2_y)
+
+  mask = np.ones((p2_y - p1_y, p2_x - p1_x))
+  frame[p1_y:p2_y, p1_x:p2_x] = mask
+
+  cv2.imshow("test", frame)
+  cv2.waitKey()
+  cv2.destroyAllWindows()
