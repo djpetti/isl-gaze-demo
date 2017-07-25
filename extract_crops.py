@@ -23,16 +23,21 @@ def should_ignore(image_name):
 
   return image_num < 5
 
-def make_pose_filename(image_file, pose):
+def make_pose_filename(image_file, pose, face_box):
   """ Adds the pose into the image filename.
   Args:
     image_file: The base name of the image.
-    pose: The pose matrix for the image. """
+    pose: The pose matrix for the image.
+    face_box: The face bounding box. """
   pitch, yaw, roll = pose
+  point1, point2 = face_box
+  p1_x, p1_y = point1
+  p2_x, p2_y = point2
 
   # Add it after the gaze location.
   pre_gaze, post_gaze = image_file.split("_", 1)
-  new_name = "%s_%f_%f_%f_%s" % (pre_gaze, pitch, yaw, roll, post_gaze)
+  new_name = "%s_%f_%f_%f_%f_%f_%f_%f_%s" % (pre_gaze, pitch, yaw, roll, p1_x,
+                                             p1_y, p2_x, p2_y, post_gaze)
 
   return new_name
 
@@ -64,8 +69,10 @@ def crop_dir(cropper, in_dir, out_dir):
 
     # Extract the pose.
     pose = cropper.estimate_pose()
-    # Add the pose into the image name.
-    image_file = make_pose_filename(image_file, pose)
+    # Extract the face bbox.
+    bbox = cropper.head_box()
+    # Add the them into the image name.
+    image_file = make_pose_filename(image_file, pose, bbox)
 
     # Save the image.
     out_path = os.path.join(out_dir, image_file)
