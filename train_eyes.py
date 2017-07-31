@@ -35,17 +35,26 @@ import json
 import os
 import sys
 
+from keras.backend.tensorflow_backend import set_session
+from keras.models import Model, load_model
 import keras.backend as K
-from keras.models import Model
+import keras.initializers as initializers
 import keras.layers as layers
 import keras.optimizers as optimizers
+import keras.regularizers as regularizers
 
 import numpy as np
 
+import tensorflow as tf
+
 import config
 
+# Limit VRAM usage.
+tf_config = tf.ConfigProto()
+tf_config.gpu_options.per_process_gpu_memory_fraction = 0.4
+set_session(tf.Session(config=tf_config))
 
-batch_size = 100
+batch_size = 150
 # How many batches to have loaded into VRAM at once.
 load_batches = 8
 # Shape of the input images.
@@ -57,18 +66,23 @@ patch_shape = (26, 56)
 iterations = 600
 
 # Learning rate hyperparameters.
-learning_rate = 0.01
+learning_rate = 0.001
 momentum = 0.9
 # Learning rate decay.
 decay = learning_rate / iterations
+#decay = 0
+
+# L2 regularization.
+l2 = 0
 
 # Where to save the network.
 save_file = "eye_model.hd5"
+daniel_save_file = "eye_model_daniel.hd5"
 synsets_save_file = "synsets.pkl"
 # Location of the dataset files.
-dataset_files = "data/daniel_myelin/dataset"
+dataset_files = "/training_data/isl_myelin_no_cross/dataset"
 # Location of the cache files.
-cache_dir = "data/daniel_myelin"
+cache_dir = "/training_data/isl_myelin_no_cross"
 
 
 def _create_bitmask_image(x1, y1, x2, y2):
@@ -146,6 +160,33 @@ def convert_labels(labels):
 
   return (stack, pose_stack, face_stack)
 
+def convert_gazecapture_labels(labels):
+  """ Special label conversion function for GazeCapture dataset, which lacks
+  auxilliary information.
+  Args:
+    labels: The labels to convert.
+  Returns:
+    The converted label gaze points, and zeros for everything else. """
+  num_labels = []
+  for label in labels:
+    coords = label.split("_")[0]
+    x_pos, y_pos = coords.split("x")
+    x_pos = float(x_pos)
+    y_pos = float(y_pos)
+
+    # Scale to screen size.
+    x_pos /= config.SCREEN_WIDTH
+    y_pos /= config.SCREEN_HEIGHT
+
+    num_labels.append([x_pos, y_pos])
+
+  stack = np.stack(num_labels, axis=0)
+  pose_stack = np.zeros((len(num_labels), 3))
+  face_stack = np.zeros((len(num_labels), 25, 25))
+
+  return (stack, pose_stack, face_stack)
+
+
 def distance_metric(y_true, y_pred):
   """ Calculates the euclidean distance between the two labels and the
   predictions.
@@ -176,46 +217,147 @@ def accuracy_metric(y_true, y_pred):
   return distance_metric(y_true, y_pred)
 
 
+def stddev_layer(layer_in):
+  """ Divides the input by its standard deviation.
+  Args:
+    layer_in: The input tensor.
+  Returns:
+    The input divided by its standard deviation. """
+  return layer_in / K.std(layer_in)
+
+def bw_layer(layer_in):
+  """ Converts the input to black-and-white.
+  Args:
+    layer_in: The input tensor.
+  Returns:
+    A black-and-white version of the input. """
+  bw = layer_in[:, :, :, 0] * 0.288 + \
+       layer_in[:, :, :, 1] * 0.587 + \
+       layer_in[:, :, :, 2] * 0.114
+  return K.expand_dims(bw, 3)
+
+def nin_layer(num_filters, filter_size, top_layer, padding="valid"):
+  """ Creates a network-in-network layer.
+  Args:
+    num_filters: The number of output filters.
+    filter_size: The size of the filters.
+    top_layer: The layer to build off of.
+    padding: The type of padding to use.
+  Returns:
+    The network-in-network layer output. """
+  l2_reg = regularizers.l2
+
+  conv = layers.Conv2D(num_filters, filter_size, kernel_regularizer=l2_reg(l2),
+                       padding=padding,
+                       kernel_initializer=deep_xavier())(top_layer)
+  # Share across all parameters in a filter.
+  act = layers.advanced_activations.PReLU(shared_axes=[1, 2])(conv)
+  norm = layers.BatchNormalization()(act)
+
+  conv2 = layers.Conv2D(num_filters * 2, (1, 1), kernel_regularizer=l2_reg(l2),
+                        kernel_initializer=deep_xavier())(norm)
+  act2 = layers.advanced_activations.PReLU(shared_axes=[1, 2])(conv2)
+  norm2 = layers.BatchNormalization()(act2)
+
+  conv3 = layers.Conv2D(num_filters, (1, 1), kernel_regularizer=l2_reg(l2),
+                        kernel_initializer=deep_xavier())(norm2)
+  act3 = layers.advanced_activations.PReLU(shared_axes=[1, 2])(conv3)
+  norm3 = layers.BatchNormalization()(act3)
+
+  return norm3
+
+
+def deep_xavier(seed=None):
+  """ This is a special variation of Glorot (normal) initialization that is
+  specifically designed to aid convergence in deep ReLU-activated networks.
+
+  It is essentially the same as standard Glorot initialization, except the
+  variance is scaled by a factor of 2. In other words,
+  `stddev = sqrt(2 / fan_in)`, where `fan_in` is the number of input units in
+  the weight tensor.
+
+  # Arguments
+    seed: A Python integer. Used to seed the random generator.
+
+  # Returns:
+    An initializer.
+
+  # References
+    He et. al, cs.CV 2015
+    https://arxiv.org/pdf/1502.01852.pdf
+  """
+  return initializers.VarianceScaling(scale=2.,
+                                      mode='fan_in',
+                                      distribution='normal',
+                                      seed=seed)
+
+
+
 def build_network():
   """
   Returns:
     The built network, ready to train. """
   #input_shape = (patch_shape[0], patch_shape[1], image_shape[2])
-  input_shape = (patch_shape[0], patch_shape[1], 1)
+  input_shape = (patch_shape[0], patch_shape[1], 3)
   inputs = layers.Input(shape=input_shape, name="main_input")
 
   floats = K.cast(inputs, "float32")
-
   noisy = layers.GaussianNoise(0)(floats)
 
-  values = layers.Convolution2D(50, (5, 5), strides=(1, 1),
-                                activation="relu")(noisy)
-  values = layers.BatchNormalization()(values)
+  noisy = layers.Lambda(bw_layer)(noisy)
+  noisy = layers.Lambda(stddev_layer)(noisy)
 
-  values = layers.Convolution2D(100, (1, 1), activation="relu")(values)
-  values = layers.BatchNormalization()(values)
-  values = layers.Convolution2D(50, (1, 1), activation="relu")(values)
-  values = layers.BatchNormalization()(values)
+  nin_path = nin_layer(50, (5, 5), noisy, padding="same")
+  resid = layers.Conv2D(50, (1, 1),
+                        kernel_initializer=deep_xavier())(noisy)
+  mod1 = layers.add([nin_path, resid])
 
-  values = layers.MaxPooling2D()(values)
+  values = layers.MaxPooling2D()(mod1)
 
-  values = layers.Convolution2D(100, (5, 5), strides=(1, 1),
-                                activation="relu")(values)
+  nin_path2 = nin_layer(100, (5, 5), values, padding="same")
+  resid2 = layers.Conv2D(100, (1, 1),
+                         kernel_initializer=deep_xavier())(values)
+  mod2 = layers.add([nin_path2, resid2])
+
+  nin_path5 = nin_layer(150, (5, 5), mod2, padding="same")
+  resid5 = layers.Conv2D(150, (1, 1),
+                         kernel_initializer=deep_xavier())(mod2)
+  mod5 = layers.add([nin_path5, resid5])
+
+  nin_path3 = nin_layer(200, (5, 5), mod5)
+  resid3 = layers.Conv2D(200, (1, 1),
+                         kernel_initializer=deep_xavier())(mod5)
+  crop = layers.Cropping2D((2, 2))(resid3)
+  mod3 = layers.add([nin_path3, crop])
+
+  pool2 = layers.MaxPooling2D()(mod3)
+
+  nin_path4 = nin_layer(200, (3, 3), pool2, padding="same")
+  mod4 = layers.add([nin_path4, pool2])
+
+  # Squeeze the number of filters so the FC part isn't so huge.
+  values = layers.Conv2D(50, (1, 1),
+                         kernel_initializer=deep_xavier())(mod4)
+  values = layers.advanced_activations.PReLU(shared_axes=[1, 2])(values)
   values = layers.BatchNormalization()(values)
-
-  values = layers.MaxPooling2D()(values)
 
   values = layers.Flatten()(values)
 
+  values = layers.Dense(100, kernel_initializer=deep_xavier())(values)
+  values = layers.advanced_activations.PReLU()(values)
+
   # Head pose input.
   pose_input = layers.Input(shape=(3,), name="pose_input")
-  pose_values = layers.Dense(100, activation="relu")(pose_input)
+  pose_values = layers.Dense(100, activation="relu",
+                             kernel_initializer=deep_xavier())(pose_input)
   pose_values = layers.BatchNormalization()(pose_values)
 
-  pose_values = layers.Dense(50, activation="relu")(pose_values)
+  pose_values = layers.Dense(50, activation="relu",
+                             kernel_initializer=deep_xavier())(pose_values)
   pose_values = layers.BatchNormalization()(pose_values)
 
-  pose_values = layers.Dense(50, activation="relu")(pose_values)
+  pose_values = layers.Dense(50, activation="relu",
+                             kernel_initializer=deep_xavier())(pose_values)
   pose_values = layers.BatchNormalization()(pose_values)
 
   # Face mask input.
@@ -224,25 +366,32 @@ def build_network():
   # We have to flatten the masks before we can use them in the FF layers.
   mask_values = layers.Flatten()(mask_input)
 
-  mask_values = layers.Dense(100, activation="relu")(mask_values)
+  mask_values = layers.Dense(100, activation="relu",
+                             kernel_initializer=deep_xavier())(mask_values)
   mask_values = layers.BatchNormalization()(mask_values)
 
-  mask_values = layers.Dense(50, activation="relu")(mask_values)
+  mask_values = layers.Dense(50, activation="relu",
+                             kernel_initializer=deep_xavier())(mask_values)
   mask_values = layers.BatchNormalization()(mask_values)
 
-  mask_values = layers.Dense(50, activation="relu")(mask_values)
+  mask_values = layers.Dense(50, activation="relu",
+                             kernel_initializer=deep_xavier())(mask_values)
   mask_values = layers.BatchNormalization()(mask_values)
 
   values = layers.concatenate([values, pose_values, mask_values])
 
-  values = layers.Dense(256, activation="relu")(values)
+  values = layers.Dense(256, activation="relu",
+                        kernel_initializer=deep_xavier())(values)
   values = layers.BatchNormalization()(values)
-  values = layers.Dense(128, activation="relu")(values)
+  values = layers.Dropout(0.5)(values)
+  values = layers.Dense(128, activation="relu",
+                        kernel_initializer=deep_xavier())(values)
+  values = layers.Dropout(0.5)(values)
   values = layers.BatchNormalization()(values)
   predictions = layers.Dense(2, activation="linear")(values)
 
   model = Model(inputs=[inputs, pose_input, mask_input], outputs=predictions)
-  rmsprop = optimizers.RMSprop(decay=decay)
+  rmsprop = optimizers.RMSprop(lr=learning_rate, decay=decay)
   model.compile(optimizer=rmsprop, loss=distance_metric,
                 metrics=[accuracy_metric])
 
@@ -250,10 +399,39 @@ def build_network():
 
   return model
 
+def load_pretrained():
+  """ Loads a pretrained version of the network.
+  Returns:
+    The pretrained network. """
+  # Remap metrics.
+  custom = {"distance_metric": distance_metric,
+            "accuracy_metric": accuracy_metric}
+
+  model = load_model(save_file, custom_objects=custom)
+
+  # Freeze the top few layers.
+  names = set(["pretr1", "pretr2", "pretr3",
+               "pretr4", "pretr5", "pretr6",
+               "conv2d_1", "batch_normalization_1"])
+  for layer in model.layers:
+    print layer.name
+    if layer.name in names:
+      layer.trainable = False
+
+  model.summary()
+
+  # Recompile with an updated optimizer.
+  rmsprop = optimizers.RMSprop(lr=learning_rate, decay=decay)
+  model.compile(optimizer=rmsprop, loss=distance_metric,
+                metrics=[accuracy_metric])
+
+  return model
+
 def main():
   logger = logging.getLogger(__name__)
 
   model = build_network()
+  #model = load_pretrained()
 
   data = data_loader.DataManagerLoader(batch_size, load_batches, image_shape,
                                        cache_dir, dataset_files,
@@ -275,12 +453,8 @@ def main():
     # Get a new chunk of training data.
     training_data, training_labels = data.get_train_set()
     # Convert to gray.
-    training_data = np.dot(training_data, [0.288, 0.587, 0.114])
-    training_data = np.expand_dims(training_data, 3)
-    training_data = training_data.astype(np.float32)
-    training_data /= np.std(training_data)
-    training_labels, pose_data, mask_data = convert_labels(training_labels)
-    #mask_data = np.zeros(mask_data.shape)
+    training_labels, pose_data, mask_data = \
+        convert_labels(training_labels)
 
     # Train the model.
     history = model.fit([training_data, pose_data, mask_data],
@@ -292,12 +466,8 @@ def main():
 
     if not i % 10:
       testing_data, testing_labels = data.get_test_set()
-      testing_data = np.dot(testing_data, [0.288, 0.587, 0.114])
-      testing_data = np.expand_dims(testing_data, 3)
-      testing_data = testing_data.astype(np.float32)
-      testing_data /= np.std(testing_data)
-      testing_labels, pose_data, mask_data = convert_labels(testing_labels)
-      #mask_data = np.zeros(mask_data.shape)
+      testing_labels, pose_data, mask_data = \
+          convert_labels(testing_labels)
 
       loss, accuracy = model.evaluate([testing_data, pose_data, mask_data],
                                       testing_labels,
@@ -307,7 +477,7 @@ def main():
       testing_acc.append(accuracy)
 
       # Save the trained model.
-      model.save(save_file)
+      model.save(daniel_save_file)
 
   data.exit_gracefully()
 
