@@ -244,7 +244,7 @@ def nin_layer(num_filters, filter_size, top_layer, padding="valid"):
     top_layer: The layer to build off of.
     padding: The type of padding to use.
   Returns:
-    The network-in-network layer output. """
+    The network-in-network layer output node. """
   l2_reg = regularizers.l2
 
   conv = layers.Conv2D(num_filters, filter_size, kernel_regularizer=l2_reg(l2),
@@ -265,6 +265,40 @@ def nin_layer(num_filters, filter_size, top_layer, padding="valid"):
   norm3 = layers.BatchNormalization()(act3)
 
   return norm3
+
+def resid_module(num_filters, filter_size, top_layer, padding="valid"):
+  """ Creates a residual module.
+  Args:
+    num_filters: The number of output filters.
+    filter_size: The size of the filters.
+    top_layer: The layer to build off of.
+    padding: The type of padding to use.
+  Returns:
+    The residual module output node. """
+  # Core conv layer.
+  nin = nin_layer(num_filters, filter_size, top_layer, padding=padding)
+
+  # Add a 1x1 conv if we need the sizes to sync up.
+  resid = top_layer
+  _, height, width, channels = K.int_shape(top_layer)
+  if (channels is None or channels != num_filters):
+    if not channels:
+      print "WARNING: Unable to detect number of channels for top layer."
+
+    resid = layers.Conv2D(num_filters, (1, 1))(top_layer)
+
+  if padding == "valid":
+    # In this case, we also need to crop to get the sizes to match.
+    filter_w, filter_h = filter_size
+    new_w = width - filter_w + 1
+    new_h = height - filter_h + 1
+
+    symmetric_w = (width - new_w) / 2
+    symmetric_h = (height - new_h) / 2
+
+    resid = layers.Cropping2D((symmetric_h, symmetric_w))(resid)
+
+  return layers.add([nin, resid])
 
 
 def deep_xavier(seed=None):
@@ -307,33 +341,17 @@ def build_network():
   noisy = layers.Lambda(bw_layer)(noisy)
   noisy = layers.Lambda(stddev_layer)(noisy)
 
-  nin_path = nin_layer(50, (5, 5), noisy, padding="same")
-  resid = layers.Conv2D(50, (1, 1),
-                        kernel_initializer=deep_xavier())(noisy)
-  mod1 = layers.add([nin_path, resid])
+  mod1 = resid_module(50, (5, 5), noisy, padding="same")
 
   values = layers.MaxPooling2D()(mod1)
 
-  nin_path2 = nin_layer(100, (5, 5), values, padding="same")
-  resid2 = layers.Conv2D(100, (1, 1),
-                         kernel_initializer=deep_xavier())(values)
-  mod2 = layers.add([nin_path2, resid2])
-
-  nin_path5 = nin_layer(150, (5, 5), mod2, padding="same")
-  resid5 = layers.Conv2D(150, (1, 1),
-                         kernel_initializer=deep_xavier())(mod2)
-  mod5 = layers.add([nin_path5, resid5])
-
-  nin_path3 = nin_layer(200, (5, 5), mod5)
-  resid3 = layers.Conv2D(200, (1, 1),
-                         kernel_initializer=deep_xavier())(mod5)
-  crop = layers.Cropping2D((2, 2))(resid3)
-  mod3 = layers.add([nin_path3, crop])
+  mod2 = resid_module(100, (5, 5), values, padding="same")
+  mod5 = resid_module(150, (5, 5), mod2, padding="same")
+  mod3 = resid_module(200, (5, 5), mod5)
 
   pool2 = layers.MaxPooling2D()(mod3)
 
-  nin_path4 = nin_layer(200, (3, 3), pool2, padding="same")
-  mod4 = layers.add([nin_path4, pool2])
+  mod4 = resid_module(200, (3, 3), pool2, padding="same")
 
   # Squeeze the number of filters so the FC part isn't so huge.
   values = layers.Conv2D(50, (1, 1),
