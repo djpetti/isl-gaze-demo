@@ -31,6 +31,7 @@ _configure_logging()
 from myelin import data_loader
 
 from six.moves import cPickle as pickle
+import argparse
 import json
 import os
 import sys
@@ -62,27 +63,37 @@ image_shape = (36, 60, 3)
 # Shape of the input patches.
 patch_shape = (26, 56)
 
-# How many iterations to train for.
-iterations = 600
+# How many iterations to train just the eye part for.
+eye_iterations = 2000
+# How many iterations to train the FC part for.
+fc_iterations = 1200
+# Iterations to pretrain with GazeCapture for.
+gc_iterations = 1000
 
 # Learning rate hyperparameters.
-learning_rate = 0.001
+learning_rate = 0.005
 momentum = 0.9
 # Learning rate decay.
 decay = learning_rate / iterations
-#decay = 0
+
+# Hyperparameters for GazeCapture pre-training.
+gc_learning_rate = 0.001
+gc_decay = gc_learning_rate / iterations
 
 # L2 regularization.
 l2 = 0
 
 # Where to save the network.
 save_file = "eye_model.hd5"
-daniel_save_file = "eye_model_daniel.hd5"
+gc_save_file = "eye_model_pretrained.hd5"
 synsets_save_file = "synsets.pkl"
 # Location of the dataset files.
 dataset_files = "/training_data/isl_myelin_no_cross/dataset"
 # Location of the cache files.
-cache_dir = "/training_data/isl_myelin_no_cross"
+cache_dir = "/training_data/isl_myelin_no_cross/"
+# Location of files for GazeCapture.
+gc_dataset_files = "/training_data/zac_gaze/gazecapture/dataset"
+gc_cache_dir = "/training_data/zac_gaze/gazecapture"
 
 
 def _create_bitmask_image(x1, y1, x2, y2):
@@ -116,73 +127,60 @@ def _create_bitmask_image(x1, y1, x2, y2):
   return frame
 
 
-def convert_labels(labels):
+def convert_labels(labels, gaze_only=False):
   """ Convert the raw labels from the dataset into matrices that can be fed into
   the loss function.
   Args:
     labels: The labels to convert.
+    gaze_only: If true, it will only extract the gaze point, and not the head
+    pose and position.
   Returns:
     The converted label gaze points, poses, and face masks. """
   num_labels = []
   poses = []
   face_masks = []
   for label in labels:
-    coords, pitch, yaw, roll, x1, y1, x2, y2 = label.split("_")[:8]
+    if not gaze_only:
+      coords, pitch, yaw, roll, x1, y1, x2, y2 = label.split("_")[:8]
+    else:
+      coords = label.split("_")[0]
+
     x_pos, y_pos = coords.split("x")
     x_pos = float(x_pos)
     y_pos = float(y_pos)
 
-    # Scale to screen size.
-    x_pos /= config.SCREEN_WIDTH
-    y_pos /= config.SCREEN_HEIGHT
+    # Scale to screen size. We divide by the smaller dimension only so that we
+    # end up with a 1-to-1 mapping between loss and pixel error.
+    small_dim = min(config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
+    x_pos /= small_dim
+    y_pos /= small_dim
 
     num_labels.append([x_pos, y_pos])
 
-    # Convert poses.
-    pitch = float(pitch)
-    yaw = float(yaw)
-    roll = float(roll)
+    if not gaze_only:
+      # Convert poses.
+      pitch = float(pitch)
+      yaw = float(yaw)
+      roll = float(roll)
 
-    poses.append([pitch, yaw, roll])
+      poses.append([pitch, yaw, roll])
 
-    # Convert bitmask.
-    x1 = float(x1)
-    y1 = float(y1)
-    x2 = float(x2)
-    y2 = float(y2)
+      # Convert bitmask.
+      x1 = float(x1)
+      y1 = float(y1)
+      x2 = float(x2)
+      y2 = float(y2)
 
-    face_mask = _create_bitmask_image(x1, y1, x2, y2)
-    face_masks.append(face_mask)
-
-  stack = np.stack(num_labels, axis=0)
-  pose_stack = np.stack(poses, axis=0)
-  face_stack = np.stack(face_masks, axis=0)
-
-  return (stack, pose_stack, face_stack)
-
-def convert_gazecapture_labels(labels):
-  """ Special label conversion function for GazeCapture dataset, which lacks
-  auxilliary information.
-  Args:
-    labels: The labels to convert.
-  Returns:
-    The converted label gaze points, and zeros for everything else. """
-  num_labels = []
-  for label in labels:
-    coords = label.split("_")[0]
-    x_pos, y_pos = coords.split("x")
-    x_pos = float(x_pos)
-    y_pos = float(y_pos)
-
-    # Scale to screen size.
-    x_pos /= config.SCREEN_WIDTH
-    y_pos /= config.SCREEN_HEIGHT
-
-    num_labels.append([x_pos, y_pos])
+      face_mask = _create_bitmask_image(x1, y1, x2, y2)
+      face_masks.append(face_mask)
 
   stack = np.stack(num_labels, axis=0)
-  pose_stack = np.zeros((len(num_labels), 3))
-  face_stack = np.zeros((len(num_labels), 25, 25))
+  if not gaze_only:
+    pose_stack = np.stack(poses, axis=0)
+    face_stack = np.stack(face_masks, axis=0)
+  else:
+    pose_stack = np.zeros((len(num_labels), 3))
+    face_stack = np.zeros((len(num_labels), 25, 25))
 
   return (stack, pose_stack, face_stack)
 
@@ -210,7 +208,8 @@ def accuracy_metric(y_true, y_pred):
     The element-wise euclidean distance between the labels and the predictions.
   """
   # Scale to actual pixel values.
-  screen_size = K.constant([config.SCREEN_WIDTH, config.SCREEN_HEIGHT])
+  small_dim = min(config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
+  screen_size = K.constant([small_dim, small_dim])
   y_true *= screen_size
   y_pred *= screen_size
 
@@ -263,6 +262,7 @@ def nin_layer(num_filters, filter_size, top_layer, padding="valid"):
                         kernel_initializer=deep_xavier())(norm2)
   act3 = layers.advanced_activations.PReLU(shared_axes=[1, 2])(conv3)
   norm3 = layers.BatchNormalization()(act3)
+  #drop3 = layers.Dropout(0.1)(norm3)
 
   return norm3
 
@@ -409,7 +409,7 @@ def build_network():
   predictions = layers.Dense(2, activation="linear")(values)
 
   model = Model(inputs=[inputs, pose_input, mask_input], outputs=predictions)
-  rmsprop = optimizers.RMSprop(lr=learning_rate, decay=decay)
+  rmsprop = optimizers.RMSprop(lr=gc_learning_rate, decay=gc_decay)
   model.compile(optimizer=rmsprop, loss=distance_metric,
                 metrics=[accuracy_metric])
 
@@ -425,12 +425,29 @@ def load_pretrained():
   custom = {"distance_metric": distance_metric,
             "accuracy_metric": accuracy_metric}
 
-  model = load_model(save_file, custom_objects=custom)
+  model = load_model(gc_save_file, custom_objects=custom)
 
   # Freeze the top few layers.
-  names = set(["pretr1", "pretr2", "pretr3",
-               "pretr4", "pretr5", "pretr6",
-               "conv2d_1", "batch_normalization_1"])
+  names = set(["conv2d_1", "p_re_lu_1", "batch_normalization_1",
+               "conv2d_2", "p_re_lu_2", "batch_normalization_2",
+               "conv2d_3", "p_re_lu_3", "batch_normalization_3",
+               "conv2d_4",
+               "conv2d_5", "p_re_lu_4", "batch_normalization_4",
+               "conv2d_6", "p_re_lu_5", "batch_normalization_5",
+               "conv2d_7", "p_re_lu_6", "batch_normalization_6",
+               "conv2d_8"])
+               #"conv2d_9", "p_re_lu_7", "batch_normalization_7",
+               #"conv2d_10", "p_re_lu_8", "batch_normalization_8",
+               #"conv2d_11", "p_re_lu_9", "batch_normalization_9",
+               #"conv2d_12",
+               #"conv2d_13", "p_re_lu_10", "batch_normalization_10",
+               #"conv2d_14", "p_re_lu_11", "batch_normalization_11",
+               #"conv2d_15", "p_re_lu_12", "batch_normalization_12",
+               #"conv2d_17", "p_re_lu_13", "batch_normalization_13",
+               #"conv2d_18", "p_re_lu_14", "batch_normalization_14",
+               #"conv2d_19", "p_re_lu_15", "batch_normalization_15",
+               #"conv2d_20", "p_re_lu_16", "batch_normalization_16"])
+               #"dense_1", "p_re_lu_17"])
   for layer in model.layers:
     print layer.name
     if layer.name in names:
@@ -439,17 +456,59 @@ def load_pretrained():
   model.summary()
 
   # Recompile with an updated optimizer.
-  rmsprop = optimizers.RMSprop(lr=learning_rate, decay=decay)
-  model.compile(optimizer=rmsprop, loss=distance_metric,
+  sgd = optimizers.SGD(lr=learning_rate / 5, momentum=momentum,
+                       decay=decay / 5)
+  model.compile(optimizer=sgd, loss=distance_metric,
                 metrics=[accuracy_metric])
 
   return model
 
-def main():
+def train_once(model, data, use_aux=True):
+  """ Run a single training iteration.
+  Args:
+    model: The model to train.
+    data: The data loader to get data from.
+    use_aux: Use auxiliary data, i.e. head pose and pos.
+  Returns:
+    The training loss. """
+  # Get a new chunk of training data.
+  training_data, training_labels = data.get_train_set()
+  # Convert to a usable form.
+  training_labels, pose_data, mask_data = \
+      convert_labels(training_labels, gaze_only=use_aux)
+
+  # Train the model.
+  history = model.fit([training_data, pose_data, mask_data],
+                      training_labels,
+                      epochs=1,
+                      batch_size=batch_size)
+
+  return history.history["loss"]
+
+def test_once(model, data, use_aux=True):
+  """ Run a single testing iteration.
+  Args:
+    model: The model to train.
+    data: The data loader to get data from.
+    use_aux: Use auxiliary data, i.e. head pose and pos.
+  Returns:
+    The testing loss and accuracy. """
+  testing_data, testing_labels = data.get_test_set()
+  testing_labels, pose_data, mask_data = \
+      convert_labels(testing_labels, gaze_only=use_aux)
+
+  loss, accuracy = model.evaluate([testing_data, pose_data, mask_data],
+                                   testing_labels,
+                                   batch_size=batch_size)
+
+  return loss, accuracy
+
+
+def train():
+  """ Trains the model. """
   logger = logging.getLogger(__name__)
 
-  model = build_network()
-  #model = load_pretrained()
+  model = load_pretrained()
 
   data = data_loader.DataManagerLoader(batch_size, load_batches, image_shape,
                                        cache_dir, dataset_files,
@@ -458,52 +517,121 @@ def main():
                                        patch_flip=False,
                                        raw_labels=True)
 
-  if os.path.exists(synsets_save_file):
-    logger.info("Loading existing synsets...")
-    data.load(synsets_save_file)
-
-
   training_acc = []
   training_loss = []
   testing_acc = []
 
-  for i in range(0, iterations):
-    # Get a new chunk of training data.
-    training_data, training_labels = data.get_train_set()
-    # Convert to gray.
-    training_labels, pose_data, mask_data = \
-        convert_labels(training_labels)
-
-    # Train the model.
-    history = model.fit([training_data, pose_data, mask_data],
-                        training_labels,
-                        epochs=1,
-              					batch_size=batch_size)
-
-    training_loss.append(history.history["loss"])
+  # Train just the eye part of the model.
+  for i in range(0, eye_iterations):
+    training_loss.append(train_once(model, data, use_aux=False))
 
     if not i % 10:
-      testing_data, testing_labels = data.get_test_set()
-      testing_labels, pose_data, mask_data = \
-          convert_labels(testing_labels)
+      loss, accuracy = test_once(model, data, use_aux=False)
 
-      loss, accuracy = model.evaluate([testing_data, pose_data, mask_data],
-                                      testing_labels,
-                                      batch_size=batch_size)
+      print "Loss: %f, Accuracy: %f" % (loss, accuracy)
+      testing_acc.append(accuracy)
+
+  print "Freezing bottom layers..."
+
+  # Freeze the bottom layers.
+  bot_layers = set(["conv2d_1", "p_re_lu_1", "batch_normalization_1",
+                    "conv2d_2", "p_re_lu_2", "batch_normalization_2",
+                    "conv2d_3", "p_re_lu_3", "batch_normalization_3",
+                    "conv2d_4",
+                    "conv2d_5", "p_re_lu_4", "batch_normalization_4",
+                    "conv2d_6", "p_re_lu_5", "batch_normalization_5",
+                    "conv2d_7", "p_re_lu_6", "batch_normalization_6",
+                    "conv2d_8",
+                    "conv2d_9", "p_re_lu_7", "batch_normalization_7",
+                    "conv2d_10", "p_re_lu_8", "batch_normalization_8",
+                    "conv2d_11", "p_re_lu_9", "batch_normalization_9",
+                    "conv2d_12",
+                    "conv2d_13", "p_re_lu_10", "batch_normalization_10",
+                    "conv2d_14", "p_re_lu_11", "batch_normalization_11",
+                    "conv2d_15", "p_re_lu_12", "batch_normalization_12",
+                    "conv2d_17", "p_re_lu_13", "batch_normalization_13",
+                    "conv2d_18", "p_re_lu_14", "batch_normalization_14",
+                    "conv2d_19", "p_re_lu_15", "batch_normalization_15",
+                    "conv2d_20", "p_re_lu_16", "batch_normalization_16"])
+
+  for layer in model.layers:
+    if layer.name in bot_layers:
+      layer.trainable = False
+
+  # Rebuild optimizer to reset the delay.
+  sgd = optimizers.SGD(lr=learning_rate, momentum=momentum, decay=decay)
+  model.compile(optimizer=sgd, loss=distance_metric,
+                metrics=[accuracy_metric])
+
+  # Continue training the top ones.
+  for i in range(0, fc_iterations):
+    training_loss.append(train_once(model, data))
+
+    if not i % 10:
+      loss, accuracy = test_once(model, data)
 
       print "Loss: %f, Accuracy: %f" % (loss, accuracy)
       testing_acc.append(accuracy)
 
       # Save the trained model.
-      model.save(daniel_save_file)
+      model.save(save_file)
 
   data.exit_gracefully()
 
   print "Saving results..."
-  results_file = open("unity_eye_results.json", "w")
+  results_file = open("training_results.json", "w")
   json.dump((training_loss, testing_acc, training_acc), results_file)
   results_file.close()
 
+def train_gazecap():
+  """ Pretrain on the GazeCapture dataset. """
+  logger = logging.getLogger(__name__)
+
+  print "Pre-training on GazeCapture dataset..."
+
+  model = build_network()
+
+  data = data_loader.DataManagerLoader(batch_size, load_batches, image_shape,
+                                       gc_cache_dir, gc_dataset_files,
+                                       patch_shape=patch_shape,
+                                       pca_stddev=50,
+                                       patch_flip=False,
+                                       raw_labels=True)
+
+  training_acc = []
+  training_loss = []
+  testing_acc = []
+
+  # Train just the eye part of the model.
+  for i in range(0, gc_iterations):
+    training_loss.append(train_once(model, data, use_aux=False))
+
+    if not i % 10:
+      loss, accuracy = test_once(model, data, use_aux=False)
+
+      print "Loss: %f, Accuracy: %f" % (loss, accuracy)
+      testing_acc.append(accuracy)
+
+      # Save the trained model.
+      model.save(gc_save_file)
+
+  data.exit_gracefully()
+
+  print "Saving results..."
+  results_file = open("training_results.json", "w")
+  json.dump((training_loss, testing_acc, training_acc), results_file)
+  results_file.close()
+
+def main():
+  parser = argparse.ArgumentParser(description="Train the eye gaze model.")
+  parser.add_argument("-p", "--pre_train", action="store_true",
+                      help="Whether to pretrain on gazecapture instead.")
+  args = parser.parse_args()
+
+  if args.pre_train:
+    train_gazecap()
+  else:
+    train()
 
 if __name__ == "__main__":
   main()
