@@ -26,9 +26,9 @@ def accuracy_metric(y_true, y_pred):
     The element-wise euclidean distance between the labels and the predictions.
   """
   # Scale to actual pixel values.
-  screen_size = K.constant([config.SCREEN_WIDTH, config.SCREEN_HEIGHT])
+  small_dim = min(config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
+  screen_size = K.constant([small_dim, small_dim])
   y_true *= screen_size
   y_pred *= screen_size
 
   return distance_metric(y_true, y_pred)
-
