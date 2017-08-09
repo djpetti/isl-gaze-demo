@@ -68,9 +68,9 @@ l2 = 0
 # Where to save the network.
 save_file = "eye_model.hd5"
 # Location of the dataset files.
-dataset_files = "/training_data/isl_myelin_no_cross/dataset"
+dataset_files = "/training_data/daniel_myelin/dataset"
 # Location of the cache files.
-cache_dir = "/training_data/isl_myelin_no_cross/"
+cache_dir = "/training_data/daniel_myelin/"
 
 
 def train():
