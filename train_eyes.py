@@ -66,7 +66,7 @@ decay = learning_rate / iterations
 l2 = 0
 
 # Where to save the network.
-save_file = "eye_model.hd5"
+save_file = "eye_model_daniel.hd5"
 # Location of the dataset files.
 dataset_files = "/training_data/daniel_myelin/dataset"
 # Location of the cache files.
