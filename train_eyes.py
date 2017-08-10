@@ -54,7 +54,7 @@ image_shape = (36, 60, 3)
 # Shape of the input patches.
 patch_shape = (26, 56)
 
-iterations = 1000
+iterations = 500
 
 # Learning rate hyperparameters.
 learning_rate = 0.001
