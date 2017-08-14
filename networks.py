@@ -145,7 +145,6 @@ def nin_layer(num_filters, filter_size, top_layer, padding="valid", l2=0):
                         kernel_initializer=deep_xavier())(norm2)
   act3 = layers.advanced_activations.PReLU(shared_axes=[1, 2])(conv3)
   norm3 = layers.BatchNormalization()(act3)
-  #drop3 = layers.Dropout(0.1)(norm3)
 
   return norm3
 
@@ -229,19 +228,20 @@ def build_network(input_shape, l2=0):
 
   mod1 = resid_module(50, (5, 5), noisy, padding="same", l2=l2)
 
-  values = layers.MaxPooling2D()(mod1)
+  values = layers.Conv2D(50, (3, 3), strides=(2, 2), padding="same")(mod1)
 
   mod2 = resid_module(100, (5, 5), values, padding="same", l2=l2)
   mod5 = resid_module(150, (5, 5), mod2, padding="same", l2=l2)
   mod3 = resid_module(200, (5, 5), mod5)
 
-  pool2 = layers.MaxPooling2D()(mod3)
+  pool2 = layers.Conv2D(200, (3, 3), strides=(2, 2), padding="same")(mod3)
 
   mod4 = resid_module(200, (3, 3), pool2, padding="same", l2=l2)
+  mod6 = resid_module(200, (3, 3), mod4, padding="same", l2=l2)
 
   # Squeeze the number of filters so the FC part isn't so huge.
   values = layers.Conv2D(75, (1, 1),
-                         kernel_initializer=deep_xavier())(mod4)
+                         kernel_initializer=deep_xavier())(mod6)
   values = layers.advanced_activations.PReLU(shared_axes=[1, 2])(values)
   values = layers.BatchNormalization()(values)
 
@@ -249,6 +249,7 @@ def build_network(input_shape, l2=0):
 
   values = layers.Dense(150, kernel_initializer=deep_xavier())(values)
   values = layers.advanced_activations.PReLU()(values)
+  values = layers.BatchNormalization()(values)
 
   # Head pose input.
   pose_input = layers.Input(shape=(3,), name="pose_input")
@@ -256,11 +257,11 @@ def build_network(input_shape, l2=0):
                              kernel_initializer=deep_xavier())(pose_input)
   pose_values = layers.BatchNormalization()(pose_values)
 
-  pose_values = layers.Dense(50, activation="relu",
+  pose_values = layers.Dense(75, activation="relu",
                              kernel_initializer=deep_xavier())(pose_values)
   pose_values = layers.BatchNormalization()(pose_values)
 
-  pose_values = layers.Dense(50, activation="relu",
+  pose_values = layers.Dense(75, activation="relu",
                              kernel_initializer=deep_xavier())(pose_values)
   pose_values = layers.BatchNormalization()(pose_values)
 
@@ -274,11 +275,11 @@ def build_network(input_shape, l2=0):
                              kernel_initializer=deep_xavier())(mask_values)
   mask_values = layers.BatchNormalization()(mask_values)
 
-  mask_values = layers.Dense(50, activation="relu",
+  mask_values = layers.Dense(75, activation="relu",
                              kernel_initializer=deep_xavier())(mask_values)
   mask_values = layers.BatchNormalization()(mask_values)
 
-  mask_values = layers.Dense(50, activation="relu",
+  mask_values = layers.Dense(75, activation="relu",
                              kernel_initializer=deep_xavier())(mask_values)
   mask_values = layers.BatchNormalization()(mask_values)
 
@@ -288,6 +289,7 @@ def build_network(input_shape, l2=0):
                         kernel_initializer=deep_xavier())(values)
   values = layers.BatchNormalization()(values)
   values = layers.Dropout(0.5)(values)
+
   values = layers.Dense(200, activation="relu",
                         kernel_initializer=deep_xavier())(values)
   values = layers.Dropout(0.5)(values)
