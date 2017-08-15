@@ -21,50 +21,47 @@ class EyeCropper:
 
     self.__image_shape = None
 
-  def __crop_left_eye(self, image, pts):
+  def __crop_eye(self, image, pts, left_index, right_index):
     """ Crops the left eye using the landmark points.
     Args:
       image: The image to crop.
       pts: The landmark points for that image.
+      left_index: The index of the left eye corner.
+      right_index: The index of the right eye corner.
     Returns:
-      The left eye image, or None if the eye is closed. """
+      The two points defining the left eye image, or None if the eye is closed. """
     # Check whether the eye is open.
-    eye_width = pts[22][0] - pts[19][0]
-    eye_height = pts[24][1] - pts[21][1]
+    eye_width = pts[left_index][0] - pts[right_index][0]
+    eye_height = pts[left_index + 2][1] - pts[right_index + 2][1]
 
     # If the ratio of height to width is too small, consider the eye closed.
     if not eye_width:
-      return None
+      return ((None, None), (None, None))
     if (eye_height / eye_width < config.EYE_OPEN_RATIO):
-      return None
+      return ((None, None), (None, None))
 
-    return misc.crop_eye(image, pts[19], pts[22])[0]
+    pt1, pt2 = misc.crop_eye(image, pts[left_index], pts[right_index])
+    pt1 = np.asarray(pt1, dtype="float")
+    pt2 = np.asarray(pt2, dtype="float")
 
-  def __get_face_box(self, points):
-    """ Quick-and-dirty face bbox estimation based on detected points.
-    Args:
-      points: The detected facial landmark points. """
-    # These points represent the extremeties.
-    left = points[0]
-    right = points[9]
-    top_1 = points[2]
-    top_2 = points[7]
-    bot = points[40]
+    return (pt1, pt2)
 
-    # Figure out extremeties.
-    low_x = left[0]
-    high_x = right[0]
-    low_y = min(top_1[1], top_2[1])
-    high_y = bot[1]
+  def __crop_left_eye(self, image, pts):
+    """ Alias for the above function that crops just the left eye. """
+    return self.__crop_eye(image, pts, 19, 22)
 
-    return ((low_x, low_y), (high_x, high_y))
+  def __crop_right_eye(self, image, pts):
+    """ Alias for the above function that crops just the right eye. """
+    return self.__crop_eye(image, pts, 25, 28)
 
   def crop_image(self, image):
     """ Crops a single image.
     Args:
       image: The image to crop.
     Returns:
-      The left eye cropped from the image, or None if it failed to crop it. """
+      The face cropped from the image, plus the bounding boxes of the left and
+      right eyes in fractions of the face image, or None if the detection
+      failed. """
     # Flip it to be compatible with other data.
     image = np.fliplr(image)
     self.__image_shape = image.shape
@@ -81,10 +78,40 @@ class EyeCropper:
 
     if confidence < config.MIN_CONFIDENCE:
       # Not a good detection.
-      return None
+      return (None, (None, None), (None, None))
 
-    # Crop the left eye.
-    return self.__crop_left_eye(image, self.__points)
+    # Crop the face.
+    face, face_top_left = misc.crop_face(image, self.__points)
+    if face is None:
+      return (None, (None, None), (None, None))
+    # Crop the eyes.
+    left_eye_pt1, left_eye_pt2 = self.__crop_left_eye(image, self.__points)
+    if left_eye_pt1[0] is None:
+      return (None, (None, None), (None, None))
+    right_eye_pt1, right_eye_pt2 = self.__crop_right_eye(image, self.__points)
+    if right_eye_pt1[0] is None:
+      return (None, (None, None), (None, None))
+
+    # Normalize everything to the face image, because right now the points from
+    # the eye crop are in terms of the full image.
+    face_top_left = np.asarray(face_top_left, dtype="float")
+    left_eye_pt1 = left_eye_pt1 - face_top_left
+    left_eye_pt2 = left_eye_pt2 - face_top_left
+    right_eye_pt1 = right_eye_pt1 - face_top_left
+    right_eye_pt2 = right_eye_pt2 - face_top_left
+
+    # Convert to frame fractions.
+    face_dims = np.asarray(face.shape[:-1], dtype="float")
+    left_eye_pt1 /= face_dims
+    left_eye_pt2 /= face_dims
+    right_eye_pt1 /= face_dims
+    right_eye_pt2 /= face_dims
+
+    # Save the face box information.
+    self.__face_top_left = face_top_left
+    self.__face_shape = face_dims
+
+    return (face, (left_eye_pt1, left_eye_pt2), (right_eye_pt1, right_eye_pt2))
 
   def estimate_pose(self):
     """ Returns the head pose estimate for the last image it cropped.
@@ -98,15 +125,12 @@ class EyeCropper:
       Two points, representing the corners of the box. They are scaled to the
       size of the image, so 0 means all the way to the left or top, and 1 means
       all the way to the right or bottom. """
-    point1, point2 = self.__get_face_box(self.__points)
-    p1_x, p1_y = point1
-    p2_x, p2_y = point2
+    point1 = self.__face_top_left
+    point2 = self.__face_top_left + self.__face_shape
 
     # Scale to the image shape.
-    image_y, image_x, _ = self.__image_shape
-    p1_x /= image_x
-    p2_x /= image_x
-    p1_y /= image_y
-    p2_y /= image_y
+    image_shape = np.asarray(self.__image_shape[:-1], dtype="float")
+    point1 /= image_shape
+    point2 /= image_shape
 
-    return ((p1_x, p1_y), (p2_x, p2_y))
+    return (point1, point2)

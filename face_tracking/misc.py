@@ -85,7 +85,7 @@ def crop_eye(img, rc, lc, aspect_ratio=(5, 3), pad_ratio=(4, 1)):
         pad_ratio: pad the left and right region outside eye corners. 
                    eye width : pad width
     return:
-        cropped eye image or None(exceed boundary)
+        2 points defining the eye bounding box, or None if out-of-bounds.
     """
     ec = (rc + lc) / 2.
     ec_width = abs(rc[0]- lc[0])
@@ -99,10 +99,11 @@ def crop_eye(img, rc, lc, aspect_ratio=(5, 3), pad_ratio=(4, 1)):
     #print(origin)
     if origin[0] >= 0 and origin[1] >= 0 and \
        origin[0]+eye_width < img.shape[1] and \
-       origin[1]+eye_height < img.shape[0]:   
-        return img[origin[1]:origin[1]+eye_height, origin[0]:origin[0]+eye_width], origin
+       origin[1]+eye_height < img.shape[0]:
+        return ((origin[0], origin[1]),
+                (origin[0] + eye_width, origin[1] + eye_height))
     else:
-        return None, None
+        return ((None, None), (None, None))
     
 def crop_face(img, pts, pad_ratio=(10, 1)):
     """
