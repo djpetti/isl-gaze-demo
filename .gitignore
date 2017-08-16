@@ -102,4 +102,3 @@ ENV/
 
 # Raw data and saved models.
 data/
-*.hd5*
