@@ -46,7 +46,7 @@ tf_config = tf.ConfigProto()
 tf_config.gpu_options.per_process_gpu_memory_fraction = 0.4
 set_session(tf.Session(config=tf_config))
 
-batch_size = 150
+batch_size = 32
 # How many batches to have loaded into VRAM at once.
 load_batches = 8
 # Shape of the input face images.
@@ -70,9 +70,9 @@ l2 = 0
 # Where to save the network.
 save_file = "eye_model_daniel.hd5"
 # Location of the dataset files.
-dataset_files = "/training_data/daniel_myelin/dataset"
+dataset_files = "data/daniel_myelin/dataset"
 # Location of the cache files.
-cache_dir = "/training_data/data/daniel_myelin/"
+cache_dir = "data/daniel_myelin/"
 
 
 def train():

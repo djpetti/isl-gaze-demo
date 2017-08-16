@@ -18,6 +18,12 @@ def _create_bitmask_image(x1, y1, x2, y2):
     x2, y2: The x and y coordinates of the second point, in frame fractions.
   Returns:
     The generated bitmask image. """
+  # TEMP: Fix the swapped axes in the code that generated this.
+  x1 *= 480.0 / 640.0
+  y1 *= 640.0 / 480.0
+  x2 *= 480.0 / 640.0
+  y2 *= 640.0 / 480.0
+
   # Scale to mask size.
   x1 *= 25
   y1 *= 25
@@ -55,7 +61,7 @@ def _crop_eye_image(face, x1, y1, x2, y2, input_shape):
     input_shape: The shape the network expects for the input eye patches.
   Returns:
     The cropped eye image. """
-  face_x, face_y, _ = face.shape
+  face_y, face_x, _ = face.shape
 
   # Scale the points to pixels.
   x1 *= face_x
@@ -379,6 +385,12 @@ def train_once(model, data, batch_size, use_aux=True):
   eye_data, gaze_labels, pose_data, mask_data = \
       convert_labels(training_data, training_labels, input_shape,
                      gaze_only=not use_aux)
+
+  for image in mask_data:
+    #image += 128
+    #image = image.astype("uint8")
+    cv2.imshow("test", image)
+    cv2.waitKey()
 
   # Train the model.
   history = model.fit([eye_data, pose_data, mask_data],
