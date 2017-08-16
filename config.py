@@ -3,7 +3,7 @@ SCREEN_WIDTH=1920
 SCREEN_HEIGHT=1070
 
 # Model to use for prediction.
-EYE_MODEL="eye_model.hd5.6"
+EYE_MODEL="eye_model_combined.hd5"
 
 # The minimum ratio of eye height to eye width before we consider the eye
 # closed.

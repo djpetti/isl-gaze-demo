@@ -71,7 +71,7 @@ dataset_files = "data/daniel_myelin/dataset"
 cache_dir = "data/daniel_myelin"
 
 
-def _create_bitmask_image(x1, y1, x2, y2):
+def create_bitmask_image(x1, y1, x2, y2):
   """ Creates the bitmask image from the bbox points.
   Args:
     x1, y1: The x and y coordinates of the first point, in frame fractions.
@@ -137,7 +137,7 @@ def convert_labels(labels):
     x2 = float(x2)
     y2 = float(y2)
 
-    face_mask = _create_bitmask_image(x1, y1, x2, y2)
+    face_mask = create_bitmask_image(x1, y1, x2, y2)
     face_masks.append(face_mask)
 
   stack = np.stack(num_labels, axis=0)

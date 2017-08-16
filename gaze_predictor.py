@@ -13,6 +13,7 @@ from face_tracking import misc
 from eye_cropper import EyeCropper
 import image_tools
 import metrics
+import train_eyes
 
 
 class GazePredictor(object):
@@ -80,7 +81,7 @@ class _CnnProcess(object):
   def __predict_once(self):
     """ Reads an image from the input queue, processes it, and writes a
     prediction to the output queue. """
-    image_batch, pose_batch, timestamp = self.__input_queue.get()
+    image_batch, pose_batch, pos_batch, timestamp = self.__input_queue.get()
 
     if time.time() - timestamp > 0.5:
       # If it's too old, don't bother.
@@ -92,7 +93,7 @@ class _CnnProcess(object):
     image_batch /= np.std(image_batch)
 
     # Generate a prediction.
-    raw_preds = self.__predictor.predict([image_batch, pose_batch],
+    raw_preds = self.__predictor.predict([image_batch, pose_batch, pos_batch],
                                          batch_size=len(image_batch))
 
     # Average all the predictions to generate a final one.
@@ -100,13 +101,14 @@ class _CnnProcess(object):
 
     self.__output_queue.put((pred, timestamp))
 
-  def add_new_input(self, images, poses, timestamp):
+  def add_new_input(self, images, poses, boxes, timestamp):
     """ Adds a new input to be processed. Will block.
     Args:
       images: A numpy array of the input images.
       poses: A numpy array of the input head poses.
+      boxes: The head boxes that were captured.
       timestamp: The time at which this image was captured. """
-    self.__input_queue.put((images, poses, timestamp))
+    self.__input_queue.put((images, poses, boxes, timestamp))
 
   def get_output(self):
     """ Gets an output from the prediction process. Will block.
@@ -176,6 +178,7 @@ class _LandmarkProcess(object):
     # Get the input images.
     image_batch = []
     pose_batch = []
+    pos_batch = []
     for _ in range(0, self.__average_num):
       eye_crop = self.__capture_eye()
       if eye_crop is None:
@@ -188,8 +191,15 @@ class _LandmarkProcess(object):
       pose = self.__cropper.estimate_pose()
       pose_batch.append(pose)
 
-      # Convert to black and white.
-      eye_crop = cv2.cvtColor(eye_crop, cv2.COLOR_BGR2GRAY)
+      # Get head position.
+      pos_p1, pos_p2 = self.__cropper.head_box()
+      # Produce the bitmask version.
+      mask = train_eyes.create_bitmask_image(pos_p1[0], pos_p1[1], pos_p2[0],
+                                             pos_p2[1])
+      cv2.imshow("test", mask)
+      cv2.waitKey(1)
+      pos_batch.append(mask)
+
       # Normalize crop size.
       eye_crop = image_tools.reshape_image(eye_crop, (56, 26))
       image_batch.append(eye_crop)
@@ -200,11 +210,11 @@ class _LandmarkProcess(object):
 
     # Generate a prediction.
     image_batch = np.stack(image_batch)
-    image_batch = np.expand_dims(image_batch, -1)
     pose_batch = np.stack(pose_batch)
     pose_batch = pose_batch[:, :, 0]
+    pos_batch = np.stack(pos_batch)
     print pose_batch
 
-
     # Send it along.
-    self.__cnn_process.add_new_input(image_batch, pose_batch, timestamp)
+    self.__cnn_process.add_new_input(image_batch, pose_batch, pos_batch,
+                                     timestamp)

@@ -52,8 +52,8 @@ def crop_dir(cropper, in_dir, out_dir):
       # Not an image.
       continue
 
-    if should_ignore(image_file):
-      continue
+    #if should_ignore(image_file):
+    #  continue
 
     image = cv2.imread(os.path.join(in_dir, image_file))
     if image is None:
