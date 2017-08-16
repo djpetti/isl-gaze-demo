@@ -4,6 +4,7 @@ import keras.initializers as initializers
 import keras.layers as layers
 import keras.regularizers as regularizers
 
+import cv2
 import numpy as np
 
 import config
@@ -27,6 +28,11 @@ def _create_bitmask_image(x1, y1, x2, y2):
   y1 = int(y1)
   x2 = int(x2)
   y2 = int(y2)
+
+  x1 = np.clip(x1, 0, 25)
+  y1 = np.clip(y1, 0, 25)
+  x2 = np.clip(x2, 0, 25)
+  y2 = np.clip(y2, 0, 25)
 
   # Create the interior image.
   width = x2 - x1
@@ -57,6 +63,16 @@ def _crop_eye_image(face, x1, y1, x2, y2, input_shape):
   x2 *= face_x
   y2 *= face_y
 
+  x1 = int(x1)
+  y1 = int(y1)
+  x2 = int(x2)
+  y2 = int(y2)
+
+  x1 = np.clip(x1, 0, face_x)
+  y1 = np.clip(y1, 0, face_y)
+  x2 = np.clip(x2, 0, face_x)
+  y2 = np.clip(y2, 0, face_y)
+
   # Crop out the image.
   eye_crop = face[y1:y2, x1:x2]
 
@@ -84,12 +100,12 @@ def convert_labels(face_data, labels, input_shape, gaze_only=False):
     face_crop = face_data[i]
 
     if not gaze_only:
-      coords, pitch, yaw, roll, x1, y1, x2, y2,
-              l_x1, l_y1, l_x2, l_y2,
+      coords, pitch, yaw, roll, x1, y1, x2, y2, \
+              l_x1, l_y1, l_x2, l_y2, \
               r_x1, r_y1, r_x2, r_y2 = label.split("_")[:16]
     else:
-      coords, _, _, _, _, _, _, _,
-              l_x1, l_y1, l_x2, l_y2,
+      coords, _, _, _, _, _, _, _, \
+              l_x1, l_y1, l_x2, l_y2, \
               r_x1, r_y1, r_x2, r_y2 = label.split("_")[0]
 
     x_pos, y_pos = coords.split("x")
@@ -353,7 +369,9 @@ def train_once(model, data, batch_size, use_aux=True):
     use_aux: Use auxiliary data, i.e. head pose and pos.
   Returns:
     The training loss. """
+  # Extract the input shape it expects.
   input_shape = model.layers[0].input_shape
+  input_shape = (input_shape[2], input_shape[1])
 
   # Get a new chunk of training data.
   training_data, training_labels = data.get_train_set()
@@ -379,7 +397,9 @@ def test_once(model, data, batch_size, use_aux=True):
     use_aux: Use auxiliary data, i.e. head pose and pos.
   Returns:
     The testing loss and accuracy. """
+  # Extract the input shape it expects.
   input_shape = model.layers[0].input_shape
+  input_shape = (input_shape[2], input_shape[1])
 
   testing_data, testing_labels = data.get_test_set()
   eye_data, gaze_labels, pose_data, mask_data = \
