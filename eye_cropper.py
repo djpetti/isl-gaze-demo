@@ -130,6 +130,8 @@ class EyeCropper:
 
     # Scale to the image shape.
     image_shape = np.asarray(self.__image_shape[:-1], dtype="float")
+    # The height and width are going to be swapped here.
+    image_shape = image_shape[::-1]
     point1 /= image_shape
     point2 /= image_shape
 
