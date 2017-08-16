@@ -7,6 +7,7 @@ import keras.regularizers as regularizers
 import numpy as np
 
 import config
+import image_tools
 
 
 def _create_bitmask_image(x1, y1, x2, y2):
@@ -39,24 +40,57 @@ def _create_bitmask_image(x1, y1, x2, y2):
 
   return frame
 
+def _crop_eye_image(face, x1, y1, x2, y2, input_shape):
+  """ Crop an eye image out of the face image.
+  Args:
+    face: The face image.
+    x1, y1: The x and y coordinates of the first eye point, in face fractions.
+    x2, y2: The x and y coordinates of the second eye point, in face fractions.
+    input_shape: The shape the network expects for the input eye patches.
+  Returns:
+    The cropped eye image. """
+  face_x, face_y, _ = face.shape
 
-def convert_labels(labels, gaze_only=False):
+  # Scale the points to pixels.
+  x1 *= face_x
+  y1 *= face_y
+  x2 *= face_x
+  y2 *= face_y
+
+  # Crop out the image.
+  eye_crop = face[y1:y2, x1:x2]
+
+  # Scale it correctly.
+  return image_tools.reshape_image(eye_crop, input_shape)
+
+def convert_labels(face_data, labels, input_shape, gaze_only=False):
   """ Convert the raw labels from the dataset into matrices that can be fed into
   the loss function.
   Args:
+    face_data: The input face crops.
     labels: The labels to convert.
+    input_shape: The shape it expects for the input eye images.
     gaze_only: If true, it will only extract the gaze point, and not the head
     pose and position.
   Returns:
-    The converted label gaze points, poses, and face masks. """
+    The converted eye crops, label gaze points, poses, and face masks. """
+  left_eye_crops = []
   num_labels = []
   poses = []
   face_masks = []
-  for label in labels:
+
+  for i in range(0, len(labels)):
+    label = labels[i]
+    face_crop = face_data[i]
+
     if not gaze_only:
-      coords, pitch, yaw, roll, x1, y1, x2, y2 = label.split("_")[:8]
+      coords, pitch, yaw, roll, x1, y1, x2, y2,
+              l_x1, l_y1, l_x2, l_y2,
+              r_x1, r_y1, r_x2, r_y2 = label.split("_")[:16]
     else:
-      coords = label.split("_")[0]
+      coords, _, _, _, _, _, _, _,
+              l_x1, l_y1, l_x2, l_y2,
+              r_x1, r_y1, r_x2, r_y2 = label.split("_")[0]
 
     x_pos, y_pos = coords.split("x")
     x_pos = float(x_pos)
@@ -69,6 +103,16 @@ def convert_labels(labels, gaze_only=False):
     y_pos /= small_dim
 
     num_labels.append([x_pos, y_pos])
+
+    # Extract the eye images.
+    l_x1 = float(l_x1)
+    l_y1 = float(l_y1)
+    l_x2 = float(l_x2)
+    l_y2 = float(l_y2)
+    left_eye_crop = _crop_eye_image(face_crop, l_x1, l_y1, l_x2, l_y2,
+                                    input_shape)
+
+    left_eye_crops.append(left_eye_crop)
 
     if not gaze_only:
       # Convert poses.
@@ -87,7 +131,8 @@ def convert_labels(labels, gaze_only=False):
       face_mask = _create_bitmask_image(x1, y1, x2, y2)
       face_masks.append(face_mask)
 
-  stack = np.stack(num_labels, axis=0)
+  l_eye_stack = np.stack(left_eye_crops, axis=0)
+  gaze_stack = np.stack(num_labels, axis=0)
   if not gaze_only:
     pose_stack = np.stack(poses, axis=0)
     face_stack = np.stack(face_masks, axis=0)
@@ -95,7 +140,7 @@ def convert_labels(labels, gaze_only=False):
     pose_stack = np.zeros((len(num_labels), 3))
     face_stack = np.zeros((len(num_labels), 25, 25))
 
-  return (stack, pose_stack, face_stack)
+  return (l_eye_stack, gaze_stack, pose_stack, face_stack)
 
 
 def stddev_layer(layer_in):
@@ -308,17 +353,20 @@ def train_once(model, data, batch_size, use_aux=True):
     use_aux: Use auxiliary data, i.e. head pose and pos.
   Returns:
     The training loss. """
+  input_shape = model.layers[0].input_shape
+
   # Get a new chunk of training data.
   training_data, training_labels = data.get_train_set()
   # Convert to a usable form.
-  training_labels, pose_data, mask_data = \
-      convert_labels(training_labels, gaze_only=not use_aux)
+  eye_data, gaze_labels, pose_data, mask_data = \
+      convert_labels(training_data, training_labels, input_shape,
+                     gaze_only=not use_aux)
 
   # Train the model.
-  history = model.fit([training_data, pose_data, mask_data],
-                      training_labels,
-                      epochs=1,
-                      batch_size=batch_size)
+  history = model.fit([eye_data, pose_data, mask_data],
+                       gaze_labels,
+                       epochs=1,
+                       batch_size=batch_size)
 
   return history.history["loss"]
 
@@ -331,12 +379,15 @@ def test_once(model, data, batch_size, use_aux=True):
     use_aux: Use auxiliary data, i.e. head pose and pos.
   Returns:
     The testing loss and accuracy. """
-  testing_data, testing_labels = data.get_test_set()
-  testing_labels, pose_data, mask_data = \
-      convert_labels(testing_labels, gaze_only=not use_aux)
+  input_shape = model.layers[0].input_shape
 
-  loss, accuracy = model.evaluate([testing_data, pose_data, mask_data],
-                                   testing_labels,
+  testing_data, testing_labels = data.get_test_set()
+  eye_data, gaze_labels, pose_data, mask_data = \
+      convert_labels(testing_data, testing_labels, input_shape,
+                     gaze_only=not use_aux)
+
+  loss, accuracy = model.evaluate([eye_data, pose_data, mask_data],
+                                   gaze_labels,
                                    batch_size=batch_size)
 
   return loss, accuracy
