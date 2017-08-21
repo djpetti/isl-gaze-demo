@@ -61,7 +61,7 @@ class _CnnProcess(object):
     self.__output_queue = Queue()
 
     # Fork the predictor process.
-    self.__process = Process(target=self.__predict_forever)
+    self.__process = Process(target=_CnnProcess.__predict_forever, args=(self,))
     self.__process.start()
 
   def release(self):
@@ -142,7 +142,8 @@ class _LandmarkProcess(object):
     self.__output_queue = Queue()
 
     # Fork the capture process.
-    self.__process = Process(target=self.__capture_forever)
+    self.__process = Process(target=_LandmarkProcess.__capture_forever,
+                             args=(self,))
     self.__process.start()
 
   def release(self):
@@ -196,8 +197,6 @@ class _LandmarkProcess(object):
       # Produce the bitmask version.
       mask = train_eyes.create_bitmask_image(pos_p1[0], pos_p1[1], pos_p2[0],
                                              pos_p2[1])
-      cv2.imshow("test", mask)
-      cv2.waitKey(1)
       pos_batch.append(mask)
 
       # Normalize crop size.
