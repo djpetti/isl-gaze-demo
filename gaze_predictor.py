@@ -61,14 +61,14 @@ class _CnnProcess(object):
     self.__output_queue = Queue()
 
     # Fork the predictor process.
-    self.__process = Process(target=_CnnProcess.__predict_forever, args=(self,))
+    self.__process = Process(target=_CnnProcess.predict_forever, args=(self,))
     self.__process.start()
 
   def release(self):
     """ Cleans up and terminates internal process. """
     self.__process.terminate()
 
-  def __predict_forever(self):
+  def predict_forever(self):
     """ Generates predictions indefinitely. """
     # Load the model we trained.
     custom = {"distance_metric": metrics.distance_metric,
@@ -142,7 +142,7 @@ class _LandmarkProcess(object):
     self.__output_queue = Queue()
 
     # Fork the capture process.
-    self.__process = Process(target=_LandmarkProcess.__capture_forever,
+    self.__process = Process(target=_LandmarkProcess.capture_forever,
                              args=(self,))
     self.__process.start()
 
@@ -163,7 +163,7 @@ class _LandmarkProcess(object):
     # Crop the left eye.
     return self.__cropper.crop_image(image)
 
-  def __capture_forever(self):
+  def capture_forever(self):
     """ Captures and crops images indefinitely. """
     # Eye cropper to use for eye detection.
     self.__cropper = EyeCropper()
