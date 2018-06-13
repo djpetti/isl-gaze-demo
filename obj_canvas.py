@@ -4,18 +4,23 @@ import Tkinter as tk
 class Canvas(object):
   """ Simple wrapper around Tkinter canvas. """
 
-  def __init__(self, window_width, window_height):
+  def __init__(self, window_width=None, window_height=None):
     """
     Args:
       window_width: The width of the window.
       window_height: The height of the window. """
     self.__window = tk.Tk()
-    self.__canvas = tk.Canvas(self.__window, width=window_width,
-                              height=window_height)
-    self.__canvas.pack()
 
-    self.__window_width = window_width
-    self.__window_height = window_height
+    if window_width is None:
+      # Use the full screen width.
+      self.__window_width = self.__window.winfo_screenwidth()
+    if window_height is None:
+      # Use the full screen height.
+      self.__window_height = self.__window.winfo_screenheight()
+
+    self.__canvas = tk.Canvas(self.__window, width=self.__window_width,
+                              height=self.__window_height)
+    self.__canvas.pack()
 
     self.update()
 

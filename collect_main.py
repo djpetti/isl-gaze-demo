@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 
+import argparse
 import sys
 import time
 
@@ -28,18 +29,28 @@ def show_calibration(seconds=10):
   cv2.destroyAllWindows()
 
 def main():
-  # Allow user to calibrate.
-  show_calibration()
+  parser = argparse.ArgumentParser("Collect eye gaze data.")
+  parser.add_argument("output_dir",
+                      help="Directory in which to save the captured images.")
+  parser.add_argument("num_dots", type=int,
+                      help="Total number of dots to display.")
+  parser.add_argument("--skip_calibration", "-s", action="store_true",
+                      help="Don't show calibration window.")
+  args = parser.parse_args()
+
+  if not args.skip_calibration:
+    # Allow user to calibrate.
+    show_calibration()
 
   # Set up the video capture.
-  cap = image_cap.ImageCap(sys.argv[1])
+  cap = image_cap.ImageCap(args.output_dir)
 
-  control = gaze_points.GazeControl(config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
+  control = gaze_points.GazeControl()
   gaze_point = control.move_dot()
   # Wait for the user's eye to get there.
   time.sleep(1)
 
-  for _ in range(0, int(sys.argv[2])):
+  for _ in range(0, args.num_dots):
     # Capture data for a second.
     cap.capture_for(1)
 

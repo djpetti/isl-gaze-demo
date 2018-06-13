@@ -6,13 +6,15 @@ import obj_canvas as oc
 class GazeControl:
   """ Handles drawing a dot on-screen and capturing the user's gaze. """
 
-  def __init__(self, window_width, window_height):
+  def __init__(self, window_width=None, window_height=None):
     """
     Args:
       window_width: The width of the window.
       window_height: The height of the window. """
     # Create the canvas.
-    self.__canvas = oc.Canvas(window_width, window_height)
+    self.__canvas = oc.Canvas(window_width=window_width,
+                              window_height=window_height)
+    print "Using window of size %dx%d." % self.__canvas.get_window_size()
 
     # Draw the dot.
     self.__dot = oc.Circle(self.__canvas, (0, 0), 15, fill="red")
