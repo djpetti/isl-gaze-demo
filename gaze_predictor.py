@@ -1,49 +1,71 @@
 from multiprocessing import Process, Queue
+import logging
 import time
 
 import cv2
 
-from keras.models import load_model
-
 import numpy as np
 
-from face_tracking import landmark_detection as ld
-from face_tracking import misc
+from ..common import config
+from ..common.eye_cropper import EyeCropper
 
-from eye_cropper import EyeCropper
-import image_tools
-import metrics
+
+logger = logging.getLogger(__name__)
+
+
+def _is_stale(timestamp):
+  """ Checks if an image is stale.
+  Args:
+    timestamp: The timestamp of the image to check.
+  Returns:
+    True if the image is stale, false otherwise. """
+  if time.time() - timestamp > config.STALE_THRESHOLD:
+    logger.warning("Dropping stale image from %f at %f." % \
+                   (timestamp, time.time()))
+    return True
+
+  return False
 
 
 class GazePredictor(object):
   """ Handles capturing eye images, and uses the model to predict gaze. """
 
-  def __init__(self, model_file, capture_dev=-1, average_num=5):
+  def __init__(self, model_file, phone, display=False):
     """
     Args:
       model_file: The saved model to load for predictions.
-      capture_dev: The camera device to capture from.
-      average_num: How many images to average in our predictions. Since we run
-                   on the GPU, we can basically predict extra ones for free, but
-                   it does take more time to capture and pre-process them. """
+      phone: The configuration data for the phone we are using.
+      display: If true, it will enable a debug display that shows the image
+               crops. """
     # Initialize capture and prediction processes.
     self.__prediction_process = _CnnProcess(model_file)
-    self.__capture_process = _LandmarkProcess(self.__prediction_process,
-                                              capture_dev=capture_dev,
-                                              average_num=average_num)
+    self.__landmark_process = _LandmarkProcess(self.__prediction_process,
+                                               phone,
+                                               display=display)
 
   def __del__(self):
     # Make sure internal processes have terminated.
-    self.__capture_process.release()
+    self.__landmark_process.release()
     self.__prediction_process.release()
 
   def predict_gaze(self):
     """ Predicts the user's gaze based on current frames.
     Returns:
-      The predicted gaze point, in normalized screen units, or (-1, -1) if it
-      failed to predict the gaze. """
+      The predicted gaze point, in cm, the sequence number of the
+      corresponding frame, and the timestamp. """
     # Wait for new output from the predictor.
     return self.__prediction_process.get_output()
+
+  def process_image(self, image, seq_num):
+    """ Adds a new image to the prediction pipeline.
+    Args:
+      image: The image to add.
+      seq_num: The sequence number of the image. """
+    # Add a new timestamp for this image. This allows us to drop frames that go
+    # stale.
+    timestamp = time.time()
+
+    self.__landmark_process.add_new_input(image, seq_num, timestamp)
 
 class _CnnProcess(object):
   """ Runs the CNN prediction in a separate process on the GPU, so that it can
@@ -60,19 +82,19 @@ class _CnnProcess(object):
     self.__output_queue = Queue()
 
     # Fork the predictor process.
-    self.__process = Process(target=self.__predict_forever)
+    self.__process = Process(target=_CnnProcess.predict_forever, args=(self,))
     self.__process.start()
 
   def release(self):
     """ Cleans up and terminates internal process. """
     self.__process.terminate()
 
-  def __predict_forever(self):
+  def predict_forever(self):
     """ Generates predictions indefinitely. """
     # Load the model we trained.
-    custom = {"distance_metric": metrics.distance_metric,
-              "accuracy_metric": metrics.accuracy_metric}
-    self.__predictor = load_model(self.__model_file, custom_objects=custom)
+    model = config.NET_ARCH()
+    self.__predictor = model.build()
+    self.__predictor.load_weights(self.__model_file)
 
     while True:
       self.__predict_once()
@@ -80,131 +102,143 @@ class _CnnProcess(object):
   def __predict_once(self):
     """ Reads an image from the input queue, processes it, and writes a
     prediction to the output queue. """
-    image_batch, pose_batch, timestamp = self.__input_queue.get()
-
-    if time.time() - timestamp > 0.5:
-      # If it's too old, don't bother.
+    left_eye, right_eye, face, grid, seq_num, timestamp = \
+        self.__input_queue.get()
+    if seq_num is None:
+      # A None tuple means the end of the sequence. Propagate this through the
+      # pipeline.
+      self.__output_queue.put((None, None, None))
+      return
+    if left_eye is None:
+      # If we have a sequence number but no images, we got a bad detection.
+      self.__output_queue.put((None, seq_num, timestamp))
+      return
+    if _is_stale(timestamp):
+      # The image is stale, so indicate that it is invalid.
+      self.__output_queue.put((None, seq_num, timestamp))
       return
 
-    # Do same pre-processing.
-    image_batch = image_batch.astype(np.float32)
-    image_batch -= 99
-    image_batch /= np.std(image_batch)
+    # Convert everything to floats.
+    left_eye = left_eye.astype(np.float32)
+    right_eye = right_eye.astype(np.float32)
+    face = face.astype(np.float32)
+
+    # Add the batch dimension.
+    left_eye = np.expand_dims(left_eye, axis=0)
+    right_eye = np.expand_dims(right_eye, axis=0)
+    face = np.expand_dims(face, axis=0)
+    grid = np.expand_dims(grid, axis=0)
 
     # Generate a prediction.
-    raw_preds = self.__predictor.predict([image_batch, pose_batch],
-                                         batch_size=len(image_batch))
+    pred = self.__predictor.predict([left_eye, right_eye, face, grid],
+                                    batch_size=1)
+    # Remove the batch dimension, and convert to Python floats.
+    pred = [float(x) for x in pred[0]]
 
-    # Average all the predictions to generate a final one.
-    pred = np.mean(raw_preds, axis=0)
+    self.__output_queue.put((pred, seq_num, timestamp))
 
-    self.__output_queue.put((pred, timestamp))
-
-  def add_new_input(self, images, poses, timestamp):
+  def add_new_input(self, left_eye, right_eye, face, grid, seq_num, timestamp):
     """ Adds a new input to be processed. Will block.
     Args:
-      images: A numpy array of the input images.
-      poses: A numpy array of the input head poses.
-      timestamp: The time at which this image was captured. """
-    self.__input_queue.put((images, poses, timestamp))
+      left_eye: The left eye crop.
+      rigth_eye: The right eye crop.
+      face: The face crop.
+      grid: The face grid.
+      seq_num: The sequence number of the image.
+      timestamp: The timestamp of the image.
+    """
+    self.__input_queue.put((left_eye, right_eye, face, grid, seq_num,
+                            timestamp))
 
   def get_output(self):
     """ Gets an output from the prediction process. Will block.
     Returns:
-      The predicted gaze point. """
-    while True:
-      gaze, timestamp = self.__output_queue.get()
-
-      # Check that it's not stale.
-      if time.time() - timestamp < 0.5:
-        return gaze
+      The predicted gaze point and the sequence number. """
+    return self.__output_queue.get()
 
 class _LandmarkProcess(object):
-  """ Captures images from the camera, and runs landmark detection in a separate
+  """ Reads images from a queue, and runs landmark detection in a separate
   process. """
 
-  def __init__(self, cnn_process, capture_dev=-1, average_num=5):
+  def __init__(self, cnn_process, phone, display=False):
     """
     Args:
+      phone: The configuration of the phone that we are capturing data on.
       cnn_process: The _CnnProcess to send captured images to.
-      capture_dev: The camera device to capture from.
-      average_num: How many images to average in our predictions. Since we run
-                   on the GPU, we can basically predict extra ones for free, but
-                   it does take more time to capture and pre-process them. """
+      display: If true, it will enable a debugging display that shows the
+               detected crops on-screen. """
     self.__cnn_process = cnn_process
-    self.__capture_dev = capture_dev
-    self.__average_num = average_num
+    self.__display = display
+    self.__phone = phone
 
     # Create the queues.
     self.__input_queue = Queue()
     self.__output_queue = Queue()
 
     # Fork the capture process.
-    self.__process = Process(target=self.__capture_forever)
+    self.__process = Process(target=_LandmarkProcess.run_forever,
+                             args=(self,))
     self.__process.start()
 
   def release(self):
     """ Cleans up and terminates internal process. """
     self.__process.terminate()
 
-  def __capture_eye(self):
-    """ Captures a single eye image.
-    Returns:
-      An image of the eye, or None if no suitable image could be obtained. """
-    # Capture the base image.
-    ret, image = self.__camera.read()
-    if not ret:
-      # Could not capture image.
-      return None
-
-    # Crop the left eye.
-    return self.__cropper.crop_image(image)
-
-  def __capture_forever(self):
-    """ Captures and crops images indefinitely. """
-    # Eye cropper to use for eye detection.
-    self.__cropper = EyeCropper()
-    # Video capture instance to use for reading frames.
-    self.__camera = cv2.VideoCapture(self.__capture_dev)
-
-    while True:
-      self.__capture_once()
-
-  def __capture_once(self):
-    """ Captures and crops a single image. It will send it to the predictor
+  def __run_once(self):
+    """ Reads and crops a single image. It will send it to the predictor
     process when finished. """
-    # Get the input images.
-    image_batch = []
-    pose_batch = []
-    for _ in range(0, self.__average_num):
-      eye_crop = self.__capture_eye()
-      if eye_crop is None:
-        # We failed to get an image.
-        continue
+    # Get the next input from the queue.
+    image, seq_num, timestamp = self.__input_queue.get()
+    if image is None:
+      # A None tuple means the end of a sequence. Propagate this through the
+      # pipeline.
+      self.__cnn_process.add_new_input(None, None, None, None, None, None)
+      return
+    if _is_stale(timestamp):
+      # Image is stale. Indicate that it is invalid.
+      self.__cnn_process.add_new_input(None, None, None, None, seq_num,
+                                       timestamp)
 
-      timestamp = time.time()
+    # Crop the image.
+    left_eye, right_eye, face = self.__cropper.crop_image(image)
+    if face is None:
+      # We failed to get an image.
+      logger.warning("Failed to get good detection for %d." % (seq_num))
+      # Send along the sequence number.
+      self.__cnn_process.add_new_input(None, None, None, None, seq_num,
+                                       timestamp)
+      return
 
-      # Get the current head pose.
-      pose = self.__cropper.estimate_pose()
-      pose_batch.append(pose)
+    # Produce face mask.
+    mask = self.__cropper.face_grid()
 
-      # Convert to black and white.
-      eye_crop = cv2.cvtColor(eye_crop, cv2.COLOR_BGR2GRAY)
-      # Normalize crop size.
-      eye_crop = image_tools.reshape_image(eye_crop, (56, 26))
-      image_batch.append(eye_crop)
+    if self.__display:
+      # Show the debugging display.
+      mask_sized = cv2.resize(mask, (224, 224))
+      mask_sized = np.expand_dims(mask_sized, axis=2)
+      mask_sized = np.tile(mask_sized, [1, 1, 3]) * 225.0
+      mask_sized = mask_sized.astype(np.uint8)
 
-    if not len(image_batch):
-      # If we somehow managed to get no images, there's not a lot we can do.
-      return (-1, -1)
-
-    # Generate a prediction.
-    image_batch = np.stack(image_batch)
-    image_batch = np.expand_dims(image_batch, -1)
-    pose_batch = np.stack(pose_batch)
-    pose_batch = pose_batch[:, :, 0]
-    print pose_batch
-
+      combined = np.concatenate((left_eye, right_eye, face, mask_sized), axis=1)
+      cv2.imshow("Server Detections", combined)
+      cv2.waitKey(1)
 
     # Send it along.
-    self.__cnn_process.add_new_input(image_batch, pose_batch, timestamp)
+    self.__cnn_process.add_new_input(left_eye, right_eye, face, mask,
+                                     seq_num, timestamp)
+
+  def run_forever(self):
+    """ Reads and crops images indefinitely. """
+    # Eye cropper to use for eye detection.
+    self.__cropper = EyeCropper(self.__phone)
+
+    while True:
+      self.__run_once()
+
+  def add_new_input(self, image, seq_num, timestamp):
+    """ Adds a new input to be processed. Will block.
+    Args:
+      image: The image to process.
+      seq_num: The sequence number of the image.
+      timestamp: The timestamp of the image. """
+    self.__input_queue.put((image, seq_num, timestamp))
