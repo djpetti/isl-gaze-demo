@@ -26,83 +26,62 @@ def _configure_logging():
 _configure_logging()
 
 
-# This forks a lot of processes, so we want to import it as soon as possible,
-# when there is as little memory as possible in use.
-from myelin import data_loader
-
 from six.moves import cPickle as pickle
 import json
 import os
 import sys
 
-import keras.backend as K
+from keras.backend.tensorflow_backend import set_session
 from keras.models import Model
+import keras.backend as K
 import keras.layers as layers
 import keras.optimizers as optimizers
 
 import numpy as np
 
+import tensorflow as tf
+
 import config
+import network
+from pipeline import data_loader, preprocess, keras_utils
 
 
-batch_size = 100
-# How many batches to have loaded into VRAM at once.
-load_batches = 8
-# Shape of the input images.
-image_shape = (36, 60, 3)
-# Shape of the input patches.
-patch_shape = (26, 56)
+batch_size = 64
+# Shape of the input to the network.
+input_shape = (32, 32, 3)
+# Shape of the raw images from the dataset.
+raw_shape = (400, 400, 3)
 
-# How many iterations to train for.
-iterations = 500
+# How many batches to run between testing intervals.
+train_interval = 20
+# How many batches to run during testing.
+test_interval = 3
+
+# Learning rates to set.
+learning_rates = [0.01, 0.001, 0.0001]
+# How many iterations to train for at each learning rate.
+iterations = [700, 700, 700]
 
 # Learning rate hyperparameters.
-learning_rate = 0.01
 momentum = 0.9
-# Learning rate decay.
-decay = learning_rate / iterations
 
 # Where to save the network.
 save_file = "eye_model.hd5"
-synsets_save_file = "synsets.pkl"
 # Location of the dataset files.
-dataset_files = "data/daniel_myelin/dataset"
-# Location of the cache files.
-cache_dir = "data/daniel_myelin"
+dataset_base = \
+    "data/tfrecords/eye_data_%s.tfrecord"
+train_dataset_file = dataset_base % ("train")
+test_dataset_file = dataset_base % ("test")
 
+# Network class to use.
+use_network = network.HeadPoseNetwork
 
-def convert_labels(labels):
-  """ Convert the raw labels from the dataset into matrices that can be fed into
-  the loss function.
-  Args:
-    labels: The labels to convert.
-  Returns:
-    The converted label gaze points, and poses. """
-  num_labels = []
-  poses = []
-  for label in labels:
-    coords, pitch, yaw, roll = label.split("_")[:4]
-    x_pos, y_pos = coords.split("x")
-    x_pos = float(x_pos)
-    y_pos = float(y_pos)
+# Configure GPU VRAM usage.
+tf_config = tf.ConfigProto()
+tf_config.gpu_options.per_process_gpu_memory_fraction = 1.0
+session = tf.Session(config=tf_config)
+set_session(session)
 
-    # Scale to screen size.
-    x_pos /= config.SCREEN_WIDTH
-    y_pos /= config.SCREEN_HEIGHT
-
-    num_labels.append([x_pos, y_pos])
-
-    # Convert poses.
-    pitch = float(pitch)
-    yaw = float(yaw)
-    roll = float(roll)
-
-    poses.append([pitch, yaw, roll])
-
-  stack = np.stack(num_labels, axis=0)
-  pose_stack = np.stack(poses, axis=0)
-
-  return (stack, pose_stack)
 
 def distance_metric(y_true, y_pred):
   """ Calculates the euclidean distance between the two labels and the
@@ -133,126 +112,239 @@ def accuracy_metric(y_true, y_pred):
 
   return distance_metric(y_true, y_pred)
 
-
-def build_network():
-  """
+def fuse_loaders(train_loader, train_pipelines, test_loader, test_pipelines):
+  """ Fuses the outputs from the training and testing loaders.
+  Args:
+    train_loader: The training loader.
+    train_pipelines: The pipelines associated with the train loader.
+    test_loader: The testing loader.
+    test_pipelines: The pipelines associated with the test loader.
   Returns:
-    The built network, ready to train. """
-  #input_shape = (patch_shape[0], patch_shape[1], image_shape[2])
-  input_shape = (patch_shape[0], patch_shape[1], 1)
-  inputs = layers.Input(shape=input_shape, name="main_input")
+    The fused outputs, in the same order as the pipeline inputs, with the labels
+    at the end. """
+  train_data = train_loader.get_data()
+  train_labels = train_loader.get_labels()
+  test_data = test_loader.get_data()
+  test_labels = test_loader.get_labels()
 
-  floats = K.cast(inputs, "float32")
+  # Extract the corresponding outputs for the pipelines.
+  train_outputs = []
+  for pipeline in train_pipelines:
+    train_outputs.append(train_data[pipeline])
+  # Add the labels too.
+  train_outputs.append(train_labels)
 
-  noisy = layers.GaussianNoise(0)(floats)
+  test_outputs = []
+  for pipeline in test_pipelines:
+    test_outputs.append(test_data[pipeline])
+  test_outputs.append(test_labels)
 
-  values = layers.Convolution2D(50, (5, 5), strides=(1, 1),
-                                activation="relu")(noisy)
-  values = layers.BatchNormalization()(values)
+  # Fuse the outputs.
+  return keras_utils.fuse_loaders(train_outputs, test_outputs)
 
-  values = layers.Convolution2D(100, (1, 1), activation="relu")(values)
-  values = layers.BatchNormalization()(values)
-  values = layers.Convolution2D(50, (1, 1), activation="relu")(values)
-  values = layers.BatchNormalization()(values)
+def add_train_stages(loader):
+  """ Convenience function to configure train loader.
+  Args:
+    loader: The DataLoader to configure.
+  Returns:
+    A tuple of the pipelines created for the loader. """
+  pipeline = loader.get_pipeline()
 
-  values = layers.MaxPooling2D()(values)
+  # Extract eye crops.
+  extract_stage = preprocess.EyeExtractionStage()
+  leye, reye, face = pipeline.add(extract_stage)
 
-  values = layers.Convolution2D(100, (5, 5), strides=(1, 1),
-                                activation="relu")(values)
-  values = layers.BatchNormalization()(values)
+  # Extract face mask.
+  mask_stage = preprocess.FaceMaskStage()
+  mask, face = face.add(mask_stage)
 
-  values = layers.MaxPooling2D()(values)
+  # Random cropping.
+  crop_stage = preprocess.RandomCropStage((390, 390))
+  face_crop_stage = preprocess.RandomCropStage((360, 360))
+  leye.add(crop_stage)
+  reye.add(crop_stage)
+  face.add(face_crop_stage)
 
-  values = layers.Flatten()(values)
+  # Random adjustments.
+  brightness_stage = preprocess.RandomBrightnessStage(50)
+  contrast_stage = preprocess.RandomContrastStage(0.9, 1.4)
+  hue_stage = preprocess.RandomHueStage(0.1)
+  saturation_stage = preprocess.RandomSaturationStage(0.9, 1.1)
+  grayscale_stage = preprocess.GrayscaleStage()
 
-  # Head pose input.
-  pose_input = layers.Input(shape=(3,), name="pose_input")
-  pose_values = layers.Dense(100, activation="relu")(pose_input)
-  pose_values = layers.BatchNormalization()(pose_values)
+  leye.add(brightness_stage)
+  leye.add(contrast_stage)
+  leye.add(grayscale_stage)
 
-  pose_values = layers.Dense(50, activation="relu")(pose_values)
-  pose_values = layers.BatchNormalization()(pose_values)
+  reye.add(brightness_stage)
+  reye.add(contrast_stage)
+  reye.add(grayscale_stage)
 
-  pose_values = layers.Dense(50, activation="relu")(pose_values)
-  pose_values = layers.BatchNormalization()(pose_values)
+  face.add(brightness_stage)
+  face.add(contrast_stage)
+  face.add(hue_stage)
+  face.add(saturation_stage)
 
-  values = layers.concatenate([values, pose_values])
+  # Normalization and final sizing.
+  norm_stage = preprocess.NormalizationStage()
+  output_size = input_shape[:2]
+  resize_stage = preprocess.ResizeStage(output_size)
+  leye.add(norm_stage)
+  reye.add(norm_stage)
+  face.add(norm_stage)
 
-  values = layers.Dense(256, activation="relu")(values)
-  values = layers.BatchNormalization()(values)
-  values = layers.Dense(128, activation="relu")(values)
-  values = layers.BatchNormalization()(values)
-  predictions = layers.Dense(2, activation="linear")(values)
+  leye.add(resize_stage)
+  reye.add(resize_stage)
+  face.add(resize_stage)
 
-  model = Model(inputs=[inputs, pose_input], outputs=predictions)
-  rmsprop = optimizers.RMSprop(decay=decay)
-  model.compile(optimizer=rmsprop, loss=distance_metric,
-                metrics=[accuracy_metric])
+  # Pose extraction.
+  pose_stage = preprocess.HeadPoseStage()
+  pose, face = face.add(pose_stage)
 
-  model.summary()
+  # Build the loader graph.
+  loader.build()
 
-  return model
+  return (leye, reye, face, mask, pose)
 
-def main():
-  logger = logging.getLogger(__name__)
+def add_test_stages(loader):
+  """ Convenience function to configure test and validation loaders.
+  Args:
+    loader: The DataLoader to configure.
+  Returns:
+    A tuple of the pipelines created for the loader. """
+  pipeline = loader.get_pipeline()
 
-  model = build_network()
+  # Extract eye crops.
+  extract_stage = preprocess.EyeExtractionStage()
+  leye, reye, face = pipeline.add(extract_stage)
 
-  data = data_loader.DataManagerLoader(batch_size, load_batches, image_shape,
-                                       cache_dir, dataset_files,
-                                       patch_shape=patch_shape,
-                                       pca_stddev=50,
-                                       patch_flip=False,
-                                       raw_labels=True)
+  # Extract face mask.
+  mask_stage = preprocess.FaceMaskStage()
+  mask, face = face.add(mask_stage)
 
-  if os.path.exists(synsets_save_file):
-    logger.info("Loading existing synsets...")
-    data.load(synsets_save_file)
+  # Take the central crops.
+  crop_stage = preprocess.CenterCropStage(0.975)
+  face_crop_stage = preprocess.CenterCropStage(0.9)
+  leye.add(crop_stage)
+  reye.add(crop_stage)
+  face.add(face_crop_stage)
 
+  # Grayscale.
+  grayscale_stage = preprocess.GrayscaleStage()
+  leye.add(grayscale_stage)
+  reye.add(grayscale_stage)
+
+  # Normalization and final sizing.
+  norm_stage = preprocess.NormalizationStage()
+  output_size = input_shape[:2]
+  resize_stage = preprocess.ResizeStage(output_size)
+  leye.add(norm_stage)
+  reye.add(norm_stage)
+  face.add(norm_stage)
+
+  leye.add(resize_stage)
+  reye.add(resize_stage)
+  face.add(resize_stage)
+
+  # Pose extraction.
+  pose_stage = preprocess.HeadPoseStage()
+  pose, face = face.add(pose_stage)
+
+  # Build the loader graph.
+  loader.build()
+
+  return (leye, reye, face, mask, pose)
+
+def build_pipeline():
+  """ Builds the preprocessing pipeline.
+  Returns:
+    The fused output nodes from the loaders, in order: leye, reye, face, grid,
+    dots. """
+  train_loader = data_loader.TrainDataLoader(train_dataset_file, batch_size,
+                                             raw_shape)
+  test_loader = data_loader.TestDataLoader(test_dataset_file, batch_size,
+                                           raw_shape)
+
+  train_pipelines = add_train_stages(train_loader)
+  test_pipelines = add_test_stages(test_loader)
+
+  return fuse_loaders(train_loader, train_pipelines,
+                      test_loader, test_pipelines)
+
+def train_section(model, learning_rate, iters, labels):
+  """ Trains for a number of iterations at one learning rate.
+  Args:
+    model: The model to train.
+    learning_rate: The learning rate to train at.
+    iters: Number of iterations to train for.
+    labels: Tensor for the labels.
+  Returns:
+    Training loss and testing accuracy for this section. """
+  print "\nTraining at %f for %d iters.\n" % (learning_rate, iters)
+
+  # Set the learning rate.
+  opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
+  model.compile(optimizer=opt, loss=distance_metric, metrics=[accuracy_metric],
+                target_tensors=[labels])
+
+  training_loss = []
+  testing_acc = []
+
+  for i in range(0, iters / train_interval):
+    # Train the model.
+    history = model.fit(epochs=1, steps_per_epoch=train_interval)
+
+    training_loss.extend(history.history["loss"])
+    logging.info("Training loss: %s" % (history.history["loss"]))
+
+    loss, accuracy = model.evaluate(steps=test_interval)
+
+    logging.info("Loss: %f, Accuracy: %f" % (loss, accuracy))
+    testing_acc.append(accuracy)
+
+    # Save the trained model.
+    model.save_weights(save_file)
+
+  return (training_loss, testing_acc)
+
+def main(load_model=None):
+  """
+  Args:
+    load_model: A pretrained model to load, if specified. """
+  # Create the training and testing pipelines.
+  input_tensors = build_pipeline()
+  data_tensors = input_tensors[:5]
+  label_tensor = input_tensors[5]
+
+  # Create the model.
+  eye_shape = (input_shape[0], input_shape[1], 1)
+  net = use_network(input_shape, eye_shape=eye_shape,
+                    data_tensors=data_tensors)
+  model = net.build()
+  if load_model:
+    logging.info("Loading pretrained model '%s'." % (load_model))
+    model.load_weights(load_model)
+
+  # Create a coordinator and run queues.
+  coord = tf.train.Coordinator()
+  threads = tf.train.start_queue_runners(coord=coord, sess=session)
 
   training_acc = []
   training_loss = []
   testing_acc = []
 
-  for i in range(0, iterations):
-    # Get a new chunk of training data.
-    training_data, training_labels = data.get_train_set()
-    # Convert to gray.
-    training_data = np.dot(training_data, [0.288, 0.587, 0.114])
-    training_data = np.expand_dims(training_data, 3)
-    training_data = training_data.astype(np.float32)
-    training_data /= np.std(training_data)
-    training_labels, pose_data = convert_labels(training_labels)
+  # Train at each learning rate.
+  for lr, iters in zip(learning_rates, iterations):
+    loss, acc = train_section(model, lr, iters, label_tensor)
 
-    # Train the model.
-    history = model.fit([training_data, pose_data],
-                        training_labels,
-                        epochs=1,
-              					batch_size=batch_size)
+    training_loss.extend(loss)
+    testing_acc.extend(acc)
 
-    training_loss.append(history.history["loss"])
-
-    if not i % 10:
-      testing_data, testing_labels = data.get_test_set()
-      testing_data = np.dot(testing_data, [0.288, 0.587, 0.114])
-      testing_data = np.expand_dims(testing_data, 3)
-      testing_data = testing_data.astype(np.float32)
-      testing_data /= np.std(testing_data)
-      testing_labels, pose_data = convert_labels(testing_labels)
-
-      loss, accuracy = model.evaluate([testing_data, pose_data], testing_labels,
-                                      batch_size=batch_size)
-
-      print "Loss: %f, Accuracy: %f" % (loss, accuracy)
-      testing_acc.append(accuracy)
-
-      # Save the trained model.
-      model.save(save_file)
-
-  data.exit_gracefully()
+  coord.request_stop()
+  coord.join(threads)
 
   print "Saving results..."
-  results_file = open("unity_eye_results.json", "w")
+  results_file = open("gazecapture_results.json", "w")
   json.dump((training_loss, testing_acc, training_acc), results_file)
   results_file.close()
 
