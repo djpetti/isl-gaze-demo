@@ -1,15 +1,21 @@
+import network
+
 # The dimensions of the user's screen, in pixels.
 SCREEN_WIDTH=1920
-SCREEN_HEIGHT=1070
+SCREEN_HEIGHT=1080
 
 # Model to use for prediction.
-EYE_MODEL="eye_model.hd5.6"
+EYE_MODEL = "models/eye_model_both_eyes.hd5"
+# Model architecture to use.
+NET_ARCH = network.HeadPoseNetwork
 
 # The minimum ratio of eye height to eye width before we consider the eye
 # closed.
 EYE_OPEN_RATIO = 0.1
 # Minimum confidence before we ignore detections.
-MIN_CONFIDENCE = 0.50
+MIN_CONFIDENCE = 0.20
+# How long a frame can be around be for we consider it stale, in seconds.
+STALE_THRESHOLD = 0.5
 
 # How many gaze readings to average in the demo. A larger number increases
 # smoothness but decreases responsiveness.

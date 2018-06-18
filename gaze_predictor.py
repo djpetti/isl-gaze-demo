@@ -4,10 +4,14 @@ import time
 
 import cv2
 
+from keras import layers
+
 import numpy as np
 
-from ..common import config
-from ..common.eye_cropper import EyeCropper
+import tensorflow as tf
+
+from eye_cropper import EyeCropper
+import config
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +24,7 @@ def _is_stale(timestamp):
   Returns:
     True if the image is stale, false otherwise. """
   if time.time() - timestamp > config.STALE_THRESHOLD:
+    print "Dropping stale frame."
     logger.warning("Dropping stale image from %f at %f." % \
                    (timestamp, time.time()))
     return True
@@ -28,25 +33,23 @@ def _is_stale(timestamp):
 
 
 class GazePredictor(object):
-  """ Handles capturing eye images, and uses the model to predict gaze. """
+  """ Takes in eye images, and uses the model to predict gaze. """
 
-  def __init__(self, model_file, phone, display=False):
+  def __init__(self, model_file, display=False):
     """
     Args:
       model_file: The saved model to load for predictions.
-      phone: The configuration data for the phone we are using.
       display: If true, it will enable a debug display that shows the image
                crops. """
-    # Initialize capture and prediction processes.
-    self.__prediction_process = _CnnProcess(model_file)
-    self.__landmark_process = _LandmarkProcess(self.__prediction_process,
-                                               phone,
-                                               display=display)
+    # Initialize landmark and prediction processes.
+    self._prediction_process = _CnnProcess(model_file)
+    self._landmark_process = _LandmarkProcess(self._prediction_process,
+                                              display=display)
 
   def __del__(self):
     # Make sure internal processes have terminated.
-    self.__landmark_process.release()
-    self.__prediction_process.release()
+    self._landmark_process.release()
+    self._prediction_process.release()
 
   def predict_gaze(self):
     """ Predicts the user's gaze based on current frames.
@@ -54,7 +57,7 @@ class GazePredictor(object):
       The predicted gaze point, in cm, the sequence number of the
       corresponding frame, and the timestamp. """
     # Wait for new output from the predictor.
-    return self.__prediction_process.get_output()
+    return self._prediction_process.get_output()
 
   def process_image(self, image, seq_num):
     """ Adds a new image to the prediction pipeline.
@@ -65,7 +68,22 @@ class GazePredictor(object):
     # stale.
     timestamp = time.time()
 
-    self.__landmark_process.add_new_input(image, seq_num, timestamp)
+    self._landmark_process.add_new_input(image, seq_num, timestamp)
+
+class GazePredictorWithCapture(GazePredictor):
+  """ Same as a GazePredictor, except it also handles capturing images from the
+  camera. """
+
+  def __init__(self, *args, **kwargs):
+    super(GazePredictorWithCapture, self).__init__(*args, **kwargs)
+
+    # Initialize capture process.
+    self._capture_process = _CaptureProcess(self._landmark_process)
+
+  def __del__(self):
+    super(GazePredictorWithCapture, self).__del__()
+
+    self._capture_process.release()
 
 class _CnnProcess(object):
   """ Runs the CNN prediction in a separate process on the GPU, so that it can
@@ -85,14 +103,38 @@ class _CnnProcess(object):
     self.__process = Process(target=_CnnProcess.predict_forever, args=(self,))
     self.__process.start()
 
+  @staticmethod
+  def _make_eye_pathway(eye_input):
+    """ Generates the preprocessing pathway for a single eye.
+    Args:
+      eye_input: The raw eye input to be preprocessed.
+    Returns:
+      The input placeholder, and the output node. """
+    # Convert to grayscale.
+    eye_gray = tf.image.rgb_to_grayscale(eye_input)
+    # Crop it properly.
+    eye_cropped = tf.image.crop_to_bounding_box(eye_gray, 3, 3, 218, 218)
+    # Resize it properly.
+    eye_resized = tf.image.resize_images(eye_cropped, (32, 32),
+                                          align_corners=True)
+    # Normalize it.
+    eye_norm = tf.map_fn(lambda frame: \
+                         tf.image.per_image_standardization(frame), eye_resized)
+
+    return eye_norm
+
   def release(self):
     """ Cleans up and terminates internal process. """
     self.__process.terminate()
 
   def predict_forever(self):
     """ Generates predictions indefinitely. """
+    # Create preprocessing layer.
+    eye_preproc_layer = layers.Lambda(_CnnProcess._make_eye_pathway)
+
     # Load the model we trained.
-    model = config.NET_ARCH()
+    model = config.NET_ARCH((224, 224, 3),
+                            eye_preproc=eye_preproc_layer)
     self.__predictor = model.build()
     self.__predictor.load_weights(self.__model_file)
 
@@ -102,7 +144,7 @@ class _CnnProcess(object):
   def __predict_once(self):
     """ Reads an image from the input queue, processes it, and writes a
     prediction to the output queue. """
-    left_eye, right_eye, face, grid, seq_num, timestamp = \
+    left_eye, right_eye, face, grid, pose, seq_num, timestamp = \
         self.__input_queue.get()
     if seq_num is None:
       # A None tuple means the end of the sequence. Propagate this through the
@@ -128,26 +170,29 @@ class _CnnProcess(object):
     right_eye = np.expand_dims(right_eye, axis=0)
     face = np.expand_dims(face, axis=0)
     grid = np.expand_dims(grid, axis=0)
+    pose = np.expand_dims(pose, axis=0)
 
     # Generate a prediction.
-    pred = self.__predictor.predict([left_eye, right_eye, face, grid],
+    pred = self.__predictor.predict([left_eye, right_eye, face, grid, pose],
                                     batch_size=1)
     # Remove the batch dimension, and convert to Python floats.
     pred = [float(x) for x in pred[0]]
 
     self.__output_queue.put((pred, seq_num, timestamp))
 
-  def add_new_input(self, left_eye, right_eye, face, grid, seq_num, timestamp):
+  def add_new_input(self, left_eye, right_eye, face, grid, pose, seq_num,
+                    timestamp):
     """ Adds a new input to be processed. Will block.
     Args:
       left_eye: The left eye crop.
-      rigth_eye: The right eye crop.
+      right_eye: The right eye crop.
       face: The face crop.
       grid: The face grid.
+      pose: The head pose.
       seq_num: The sequence number of the image.
       timestamp: The timestamp of the image.
     """
-    self.__input_queue.put((left_eye, right_eye, face, grid, seq_num,
+    self.__input_queue.put((left_eye, right_eye, face, grid, pose, seq_num,
                             timestamp))
 
   def get_output(self):
@@ -160,19 +205,17 @@ class _LandmarkProcess(object):
   """ Reads images from a queue, and runs landmark detection in a separate
   process. """
 
-  def __init__(self, cnn_process, phone, display=False):
+  def __init__(self, cnn_process, display=False):
     """
     Args:
-      phone: The configuration of the phone that we are capturing data on.
       cnn_process: The _CnnProcess to send captured images to.
       display: If true, it will enable a debugging display that shows the
                detected crops on-screen. """
     self.__cnn_process = cnn_process
     self.__display = display
-    self.__phone = phone
 
     # Create the queues.
-    self.__input_queue = Queue()
+    self.__input_queue = Queue(maxsize=1)
     self.__output_queue = Queue()
 
     # Fork the capture process.
@@ -192,11 +235,11 @@ class _LandmarkProcess(object):
     if image is None:
       # A None tuple means the end of a sequence. Propagate this through the
       # pipeline.
-      self.__cnn_process.add_new_input(None, None, None, None, None, None)
+      self.__cnn_process.add_new_input(None, None, None, None, None, None, None)
       return
     if _is_stale(timestamp):
       # Image is stale. Indicate that it is invalid.
-      self.__cnn_process.add_new_input(None, None, None, None, seq_num,
+      self.__cnn_process.add_new_input(None, None, None, None, None, seq_num,
                                        timestamp)
 
     # Crop the image.
@@ -205,12 +248,15 @@ class _LandmarkProcess(object):
       # We failed to get an image.
       logger.warning("Failed to get good detection for %d." % (seq_num))
       # Send along the sequence number.
-      self.__cnn_process.add_new_input(None, None, None, None, seq_num,
+      self.__cnn_process.add_new_input(None, None, None, None, None, seq_num,
                                        timestamp)
       return
 
     # Produce face mask.
     mask = self.__cropper.face_grid()
+    # Estimate the head pose.
+    head_pose = self.__cropper.estimate_pose()
+    head_pose = head_pose[:, 0]
 
     if self.__display:
       # Show the debugging display.
@@ -225,12 +271,12 @@ class _LandmarkProcess(object):
 
     # Send it along.
     self.__cnn_process.add_new_input(left_eye, right_eye, face, mask,
-                                     seq_num, timestamp)
+                                     head_pose, seq_num, timestamp)
 
   def run_forever(self):
     """ Reads and crops images indefinitely. """
     # Eye cropper to use for eye detection.
-    self.__cropper = EyeCropper(self.__phone)
+    self.__cropper = EyeCropper()
 
     while True:
       self.__run_once()
@@ -242,3 +288,47 @@ class _LandmarkProcess(object):
       seq_num: The sequence number of the image.
       timestamp: The timestamp of the image. """
     self.__input_queue.put((image, seq_num, timestamp))
+
+class _CaptureProcess(object):
+  """ Process that captures images from the camera, sends them over a queue. """
+
+  def __init__(self, landmark_process, camera=-1):
+    """
+    Args:
+      landmark_process: The landmark detection process to send images to.
+      camera: The camera device to capture from. """
+    self.__landmark_process = landmark_process
+    self.__camera = camera
+
+    # Fork the capture process.
+    self.__process = Process(target=_CaptureProcess.run_forever,
+                             args=(self,))
+    self.__process.start()
+
+  def __run_once(self):
+    """ Runs a single iteration of the capture process. """
+    ret, image = self.__capture.read()
+    if not ret:
+      raise RuntimeError("Could not read from camera.")
+
+    # Send the image along.
+    timestamp = time.time()
+    self.__landmark_process.add_new_input(image, self.__sequence_num, timestamp)
+
+    # Update the sequence number.
+    self.__sequence_num += 1
+    self.__sequence_num %= 255
+
+  def run_forever(self):
+    """ Runs the process indefinitely. """
+    # Capture device to use.
+    self.__capture = cv2.VideoCapture(self.__camera)
+    # Sequence number for images.
+    self.__sequence_num = 0
+
+    while True:
+      self.__run_once()
+
+  def release(self):
+    """ Cleans up and terminates internal process. """
+    self.__process.terminate()

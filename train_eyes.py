@@ -42,7 +42,6 @@ import numpy as np
 import tensorflow as tf
 
 import config
-import network
 from pipeline import data_loader, preprocess, keras_utils
 
 
@@ -72,9 +71,6 @@ dataset_base = \
     "data/tfrecords/eye_data_%s.tfrecord"
 train_dataset_file = dataset_base % ("train")
 test_dataset_file = dataset_base % ("test")
-
-# Network class to use.
-use_network = network.HeadPoseNetwork
 
 # Configure GPU VRAM usage.
 tf_config = tf.ConfigProto()
@@ -318,8 +314,8 @@ def main(load_model=None):
 
   # Create the model.
   eye_shape = (input_shape[0], input_shape[1], 1)
-  net = use_network(input_shape, eye_shape=eye_shape,
-                    data_tensors=data_tensors)
+  net = config.NET_ARCH(input_shape, eye_shape=eye_shape,
+                        data_tensors=data_tensors)
   model = net.build()
   if load_model:
     logging.info("Loading pretrained model '%s'." % (load_model))

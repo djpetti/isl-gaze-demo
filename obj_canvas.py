@@ -11,6 +11,8 @@ class Canvas(object):
       window_height: The height of the window. """
     self.__window = tk.Tk()
 
+    self.__window_width = window_width
+    self.__window_height = window_height
     if window_width is None:
       # Use the full screen width.
       self.__window_width = self.__window.winfo_screenwidth()
