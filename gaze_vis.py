@@ -4,9 +4,10 @@ import obj_canvas as oc
 class GazeVis(object):
   """ Visualizes the user's gaze point. """
 
-  def __init__(self, window_width=1920, window_height=1070):
+  def __init__(self, window_width=None, window_height=None):
     # Create canvas window.
-    self.__canvas = oc.Canvas(window_width, window_height)
+    self.__canvas = oc.Canvas(window_width=window_width,
+                              window_height=window_height)
     self.__dot = None
 
   def visualize_point(self, point):
@@ -29,3 +30,7 @@ class GazeVis(object):
 
     self.__dot.delete()
     self.__dot = None
+
+  def get_window_size(self):
+    """ Returns: The size of the window. """
+    return self.__canvas.get_window_size()

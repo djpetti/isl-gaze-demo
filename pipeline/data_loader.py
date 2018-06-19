@@ -1,3 +1,5 @@
+import os
+
 import tensorflow as tf
 
 import preprocess
@@ -33,6 +35,11 @@ class DataLoader(object):
       records_file: The TFRecords file to read data from.
       batch_size: The size of batches to read.
       image_shape: The shape of images to load. """
+    if not os.path.exists(records_file):
+      # If we don't check this, TensorFlow gives us a really confusing and
+      # hard-to-debug error later on.
+      raise ValueError("File '%s' does not exist." % (records_file))
+
     self._image_shape = image_shape
     self._records_file = records_file
     self._batch_size = batch_size

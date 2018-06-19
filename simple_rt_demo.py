@@ -1,11 +1,12 @@
 #!/usr/bin/python
 
 
+import argparse
+
 from gaze_predictor import GazePredictorWithCapture
 from gaze_vis import GazeVis
 
 import collect_main
-import config
 
 
 """ A simple realtime demo that moves a point around based on a user's gaze
@@ -13,13 +14,21 @@ location. """
 
 
 def main():
+  parser = argparse.ArgumentParser(description="Run a simple realtime demo.")
+  parser.add_argument("model", help="The model file to use for inference.")
+  parser.add_argument("-s", "--skip_calibration", action="store_true",
+                      help="If set, don't show calibration video.")
+  args = parser.parse_args()
+
   # Give user a chance to get in position.
-  #collect_main.show_calibration()
+  if not args.skip_calibration:
+    collect_main.show_calibration()
 
   # Create predictor and visualizer.
-  predictor = GazePredictorWithCapture(config.EYE_MODEL)
-  visualizer = GazeVis(window_width=config.SCREEN_WIDTH,
-                       window_height=config.SCREEN_HEIGHT)
+  predictor = GazePredictorWithCapture(args.model)
+  visualizer = GazeVis()
+
+  window_width, window_height = visualizer.get_window_size()
 
   while True:
     # Get a prediction.
@@ -31,8 +40,8 @@ def main():
     x_raw, y_raw = pred
 
     # Convert to actual pixels.
-    x_pix = int(x_raw * config.SCREEN_WIDTH)
-    y_pix = int(y_raw * config.SCREEN_HEIGHT)
+    x_pix = int(x_raw * window_width)
+    y_pix = int(y_raw * window_height)
     print (x_pix, y_pix)
 
     # Update visualization.
