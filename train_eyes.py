@@ -9,10 +9,10 @@ def _configure_logging():
   # Cofigure root logger.
   root = logging.getLogger()
   root.setLevel(logging.DEBUG)
-  file_handler = logging.FileHandler("unity_gaze.log")
+  file_handler = logging.FileHandler("train_session.log")
   file_handler.setLevel(logging.DEBUG)
   stream_handler = logging.StreamHandler()
-  stream_handler.setLevel(logging.WARNING)
+  stream_handler.setLevel(logging.INFO)
   formatter = logging.Formatter("%(name)s@%(asctime)s: " + \
       "[%(levelname)s] %(message)s")
 
@@ -27,9 +27,9 @@ _configure_logging()
 
 
 from six.moves import cPickle as pickle
+import argparse
 import json
 import os
-import sys
 
 from keras.backend.tensorflow_backend import set_session
 from keras.models import Model
@@ -63,14 +63,6 @@ iterations = [700, 700, 700]
 
 # Learning rate hyperparameters.
 momentum = 0.9
-
-# Where to save the network.
-save_file = "eye_model.hd5"
-# Location of the dataset files.
-dataset_base = \
-    "data/tfrecords/eye_data_%s.tfrecord"
-train_dataset_file = dataset_base % ("train")
-test_dataset_file = dataset_base % ("test")
 
 # Configure GPU VRAM usage.
 tf_config = tf.ConfigProto()
@@ -251,14 +243,17 @@ def add_test_stages(loader):
 
   return (leye, reye, face, mask, pose)
 
-def build_pipeline():
+def build_pipeline(train_data, test_data):
   """ Builds the preprocessing pipeline.
+  Args:
+    train_data: The training data TFRecords file.
+    test_data: The testing data TFRecords file.
   Returns:
     The fused output nodes from the loaders, in order: leye, reye, face, grid,
     dots. """
-  train_loader = data_loader.TrainDataLoader(train_dataset_file, batch_size,
+  train_loader = data_loader.TrainDataLoader(train_data, batch_size,
                                              raw_shape)
-  test_loader = data_loader.TestDataLoader(test_dataset_file, batch_size,
+  test_loader = data_loader.TestDataLoader(test_data, batch_size,
                                            raw_shape)
 
   train_pipelines = add_train_stages(train_loader)
@@ -267,13 +262,14 @@ def build_pipeline():
   return fuse_loaders(train_loader, train_pipelines,
                       test_loader, test_pipelines)
 
-def train_section(model, learning_rate, iters, labels):
+def train_section(model, learning_rate, iters, labels, save_file):
   """ Trains for a number of iterations at one learning rate.
   Args:
     model: The model to train.
     learning_rate: The learning rate to train at.
     iters: Number of iterations to train for.
     labels: Tensor for the labels.
+    save_file: File to save the weights to.
   Returns:
     Training loss and testing accuracy for this section. """
   print "\nTraining at %f for %d iters.\n" % (learning_rate, iters)
@@ -307,8 +303,18 @@ def main(load_model=None):
   """
   Args:
     load_model: A pretrained model to load, if specified. """
+  # Parse arguments.
+  parser = argparse.ArgumentParser(description="Train the model.")
+  parser.add_argument("train_set",
+                      help="The path to the training TFRecords data.")
+  parser.add_argument("test_set",
+                      help="The path to the testing TFRecords data.")
+  parser.add_argument("-o", "--output", default="eye_model.hd5",
+                      help="Output model file.")
+  args = parser.parse_args()
+
   # Create the training and testing pipelines.
-  input_tensors = build_pipeline()
+  input_tensors = build_pipeline(args.train_set, args.test_set)
   data_tensors = input_tensors[:5]
   label_tensor = input_tensors[5]
 
@@ -331,7 +337,7 @@ def main(load_model=None):
 
   # Train at each learning rate.
   for lr, iters in zip(learning_rates, iterations):
-    loss, acc = train_section(model, lr, iters, label_tensor)
+    loss, acc = train_section(model, lr, iters, label_tensor, args.output)
 
     training_loss.extend(loss)
     testing_acc.extend(acc)
