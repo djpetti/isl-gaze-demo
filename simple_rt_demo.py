@@ -3,8 +3,8 @@
 
 import argparse
 
-from gaze_predictor import GazePredictorWithCapture
-from gaze_vis import GazeVis
+from gaze_demo.gaze_predictor import GazePredictorWithCapture
+from gaze_demo.gaze_vis import GazeVis
 
 import collect_main
 

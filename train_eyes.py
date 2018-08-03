@@ -41,8 +41,8 @@ import numpy as np
 
 import tensorflow as tf
 
-import config
-from pipeline import data_loader, preprocess, keras_utils
+from gaze_demo import config
+from gaze_demo.pipeline import data_loader, preprocess, keras_utils
 
 
 batch_size = 64

@@ -3,11 +3,8 @@
 
 from Tkinter import TclError
 
-from gaze_predictor import GazePredictor
-import breakout_graphics
-import collect_main
-import config
-import obj_canvas
+from gaze_demo.gaze_predictor import GazePredictor
+from gaze_demo import breakout_graphics, collect_main, config, obj_canvas
 
 
 """ A version of the breakout game controled by eye gaze. """

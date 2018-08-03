@@ -79,7 +79,7 @@ class Network(object):
     # Build the custom parts.
     outputs = self._build_custom()
 
-    # Create the model.
+    # Crea the model.
     model = Model(inputs=[self._left_eye_input, self._right_eye_input,
                           self._face_input, self._grid_input, self._pose_input],
                   outputs=outputs)

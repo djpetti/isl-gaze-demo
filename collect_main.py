@@ -7,9 +7,7 @@ import time
 
 import cv2
 
-import config
-import image_cap
-import gaze_points
+from gaze_demo import config, image_cap, gaze_points
 
 
 def show_calibration(seconds=10):

@@ -10,7 +10,7 @@ import cv2
 
 import tensorflow as tf
 
-from eye_cropper import EyeCropper
+from gaze_demo.eye_cropper import EyeCropper
 
 
 def _int64_feature(value):
