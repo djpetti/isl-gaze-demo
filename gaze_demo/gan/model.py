@@ -1,32 +1,54 @@
+from keras.models import Model
 import keras.backend as K
 import keras.layers as layers
 
 from .. import network
 
+import custom_layers
 
-class RefinerNetwork(network.Network):
+
+class GanNetwork(network.Network):
+  """ Subclass of a standard network that (for now) ignores some of the inputs.
+  """
+
+  def build(self):
+    # Build the common parts.
+    self._build_common()
+    # Build the custom parts.
+    outputs = self._build_custom()
+
+    # Create the model.
+    model = Model(inputs=[self._left_eye_input], outputs=outputs)
+    model.summary()
+
+    return model
+
+class RefinerNetwork(GanNetwork):
   """ Network that refines images from another person to make them look like
   images from me. """
 
   def _build_custom(self):
     # Convolutional layers.
-    conv1 = layers.Conv2D(64, (3, 3), activation="relu")
-    block = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    conv1 = layers.Conv2D(64, (3, 3), padding="SAME", activation="relu")
+    block1 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    block2 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    block3 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    block4 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
     conv2 = layers.Conv2D(1, (1, 1))
     out = layers.Activation("tanh")
 
     # Apply the layers.
     r1 = conv1(self._left_eye_node)
-    r2 = block(r1)
-    r3 = block(r2)
-    r4 = block(r3)
-    r5 = block(r4)
+    r2 = block1(r1)
+    r3 = block2(r2)
+    r4 = block3(r3)
+    r5 = block4(r4)
     r6 = conv2(r5)
     refined = out(r6)
 
     return refined
 
-class DescriminatorNetwork(network.Network):
+class DescriminatorNetwork(GanNetwork):
   """ Network that attempts to distinguish between actual images of me and
   refined images of me. """
 
@@ -63,6 +85,14 @@ class AdversarialLoss(object):
     self.__descrim_model = descrim_model
     self.__reg_scale = scale
 
+  @property
+  def __name__(self):
+    """ Keras expects this to be a function with a __name__ attribute, so we
+    have to add one.
+    Returns:
+      The name of the class. """
+    return self.__class__.__name__
+
   def __call__(self, y_true, y_pred):
     """ Implements the GAN loss.
     Args:
@@ -82,14 +112,19 @@ class AdversarialLoss(object):
     Returns:
       The value of the realism loss for these images. """
     # Get the descriminator classification.
-    descrim_output = self.__descrim_model([refined, None, None, None])
+    descrim_output = self.__descrim_model([refined])
 
-    loss = K.log(1.0 - descrim_output)
-    # Sum into a single number.
+    # Calculate cross-entropy loss. In this case, the "right" answer is all of
+    # them being fake.
+    labels = K.ones_like(descrim_output)
+    loss = K.binary_crossentropy(labels, descrim_output)
+
+    # Sum over all positions.
+    loss = K.sum(loss, axis=3)
     loss = K.sum(loss, axis=2)
     loss = K.sum(loss, axis=1)
 
-    return -loss
+    return loss
 
   def __regularization_loss(self, raw, refined):
     """ Calculates the value of the regularization term.

@@ -149,6 +149,11 @@ class _ResNetConvBlock(_SuperLayer):
     transparently to the underlying Conv2D layers. """
     super(_ResNetConvBlock, self).__init__()
 
+    # For now, it's easier not to mess with unpadded convolutions.
+    if "padding" in kwargs:
+      raise ValueError("Cannot specify padding for residual block.")
+    kwargs["padding"] = "SAME"
+
     self.__conv_args = [filters, kernel_size]
     self.__conv_kwargs = kwargs
 
@@ -160,7 +165,7 @@ class _ResNetConvBlock(_SuperLayer):
     conv1 = layers.Conv2D(*self.__conv_args, **self.__conv_kwargs)
     # We don't want activation for the last layer, since it will be added after
     # the addition operation.
-    conv2_kwargs = self.__conv_kwargs[:]
+    conv2_kwargs = self.__conv_kwargs.copy()
     conv2_kwargs["activation"] = None
     conv2 = layers.Conv2D(*self.__conv_args, **conv2_kwargs)
 

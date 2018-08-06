@@ -1,9 +1,9 @@
-from ..pipeline import data_loader, preprocess
+from ..pipeline import data_loader, keras_utils, preprocess
 
 class PipelineBuilder(object):
   """ Responsible for building and configuring input pipelines. """
 
-  def __init__(self, raw_shape, image_size, bath_size):
+  def __init__(self, raw_shape, image_size, batch_size):
     """
     Args:
       raw_shape: The original shape we expect for images loaded from the disk.
@@ -90,7 +90,6 @@ class PipelineBuilder(object):
 
     # Normalization and final sizing.
     norm_stage = preprocess.NormalizationStage()
-    output_size = input_shape[:2]
     resize_stage = preprocess.ResizeStage(self.__image_size)
     leye.add(norm_stage)
     reye.add(norm_stage)
@@ -139,7 +138,6 @@ class PipelineBuilder(object):
 
     # Normalization and final sizing.
     norm_stage = preprocess.NormalizationStage()
-    output_size = input_shape[:2]
     resize_stage = preprocess.ResizeStage(self.__image_size)
     leye.add(norm_stage)
     reye.add(norm_stage)
@@ -158,7 +156,7 @@ class PipelineBuilder(object):
 
     return (leye, reye, face, mask, pose)
 
-  def build_pipeline(train_data, test_data):
+  def build_pipeline(self, train_data, test_data):
     """ Builds the preprocessing pipeline.
     Args:
       train_data: The training data TFRecords file.

@@ -1,3 +1,8 @@
+import keras.backend as K
+import keras.optimizers as optimizers
+
+import tensorflow as tf
+
 import model
 import pipelines
 
@@ -8,42 +13,63 @@ RAW_IMAGE_SHAPE = (400, 400, 3)
 INPUT_SHAPE = (40, 40, 1)
 # Schedule to use when training the model. Each tuple contains a learning rate
 # and the number of iterations to train for at that learning rate.
-LR_SCHEDULE = [(1000, 0.001)]
+LR_SCHEDULE = [(0.001, 1000)]
 
 
-def build_descrim_batches(self, labeled_inputs, unlabeled_inputs, refiner):
-  """ Builds the part of the graph that generates mini-batches for the
-  descriminator network.
+# Configure GPU VRAM usage.
+tf_config = tf.ConfigProto()
+tf_config.gpu_options.per_process_gpu_memory_fraction = 1.0
+g_session = tf.Session(config=tf_config)
+K.tensorflow_backend.set_session(g_session)
+
+
+def build_descrim(labeled_inputs, unlabeled_inputs, refiner):
+  """ Builds the descriminator network, along with the machinery that generates
+  batches for it.
   Args:
     labeled_inputs: The output tensors from the pipeline for labeled data.
     unlabeled_inputs: The output tensors from the pipeline for unlabeled data.
     refiner: The refiner model. We need to run this to generate batch images.
   Returns:
-    The batch tensor, and the label tensor for the descriminator.
+    The descriminator model, and the label tensor for the descriminator.
   """
   # Run the refiner on all unlabled data.
-  refined = refiner(unlabeled_inputs)
+  refined = refiner(unlabeled_inputs[:1])
 
-  # Create initial labels tensor.
-  labels_true = tf.ones(labeled_inputs.shape[0])
-  labels_fake = tf.zeros(unlabeled_inputs.shape[0])
-  labels = tf.concat([labels_true, labels_fake], 0)
+  left_eye_labeled = labeled_inputs[0]
+  left_eye_unlabeled = unlabeled_inputs[0]
 
   # Shuffle the labeled and unlabled data into a single mini-batch.
-  combined = tf.concat([labeled_inputs, refined], 0)
+  combined = tf.concat([left_eye_labeled, refined], 0)
   indices = tf.range(combined.shape[0])
   shuffled_indices = tf.random_shuffle(indices)
 
   combined = tf.gather(combined, shuffled_indices)
-  labels = tf.gather(combined, shuffled_indices)
 
-  return combined, labels
+  # Build the model.
+  desc_inputs = [combined, None, None, None, None]
+  descriminator = model.DescriminatorNetwork(INPUT_SHAPE,
+                                             data_tensors=desc_inputs)
+  desc_model = descriminator.build()
 
-def train_section(refine_model, desc_model, labels, loss, config):
+  # Compute size of the labels tensor.
+  labels_shape = desc_model.compute_output_shape(left_eye_labeled.get_shape())
+  # Create initial labels tensor.
+  labels_true = tf.ones(labels_shape)
+  labels_fake = tf.zeros(labels_shape)
+  labels = tf.concat([labels_true, labels_fake], 0)
+  # Shuffle the labels.
+  labels = tf.gather(labels, shuffled_indices)
+
+  return desc_model, labels
+
+def train_section(refine_model, desc_model, gazecap_data, labels, loss,
+                  config):
   """ Trains for a number of iterations at one learning rate.
   Args:
     refine_model: The refiner model to train.
     desc_model: The descriminator model to train.
+    gazecap_data: Input tensors for the refiner network.
     labels: Tensor of the labels for the descriminator model.
     loss: AdversarialLoss object to use when building optimizers.
     config: A configuration dictionary. It should contain the following items:
@@ -64,13 +90,17 @@ def train_section(refine_model, desc_model, labels, loss, config):
   ref_updates = config["ref_updates"]
   desc_updates = config["desc_updates"]
 
+  # We only use the left eye input for now.
+  refiner_inputs = gazecap_data[:1]
+
   print "\nTraining at %f for %d iters.\n" % (learning_rate, iters)
 
   # Set the optimizers.
   ref_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
   desc_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
+  # The refiner expects its inputs to be passed as the targets.
   refine_model.compile(optimizer=ref_opt, loss=loss,
-                       metrics=[model.passthrough_loss])
+                       metrics=[loss], target_tensors=refiner_inputs)
   desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
                      target_tensors=[labels])
 
@@ -79,7 +109,9 @@ def train_section(refine_model, desc_model, labels, loss, config):
 
   for i in range(0, iters):
     # Train the refiner model.
+    print "Starting refiner fit..."
     history = refine_model.fit(epochs=1, steps_per_epoch=ref_updates)
+    print "Done."
 
     training_loss.extend(history.history["loss"])
     logging.info("Training loss: %s" % (history.history["loss"]))
@@ -104,25 +136,26 @@ def train_gan(args):
                                                   args.personal_test_set)
   gazecap_input_tensors = builder.build_pipeline(args.gazecap_train_set,
                                                  args.gazecap_test_set)
+  # Discard regression labels, as those are irrelevant for this task.
   personal_data_tensors = personal_input_tensors[:5]
   gazecap_data_tensors = gazecap_input_tensors[:5]
 
   # Build the refiner model.
-  refiner = model.RefinerNetwork(input_shape,
+  refiner = model.RefinerNetwork(INPUT_SHAPE,
                                  data_tensors=gazecap_data_tensors)
   refiner_model = refiner.build()
 
-  # Create batch mixing subgraph for the descriminator inputs.
-  desc_inputs, desc_labels = build_descrim_batches(personal_data_tensors,
-                                                   gazecap_data_tensors,
-                                                   refiner_model)
-
-  descriminator = model.DescriminatorNetwork(input_shape,
-                                             data_tensors=desc_inputs)
-  desc_model = descriminator.build()
+  # Create descriminator model.
+  desc_model, desc_labels = build_descrim(personal_data_tensors,
+                                          gazecap_data_tensors,
+                                          refiner_model)
 
   # Create loss for refiner network.
   refiner_loss = model.AdversarialLoss(desc_model, args.reg_scale)
+
+  # Create a coordinator and run queues.
+  coord = tf.train.Coordinator()
+  threads = tf.train.start_queue_runners(coord=coord, sess=g_session)
 
   # Create configuration dict for training.
   base_config = {"momentum": args.momentum, "save_file": args.output,
@@ -131,8 +164,12 @@ def train_gan(args):
 
   # Train the model.
   for lr, iters in LR_SCHEDULE:
-    config = base_config[:]
+    config = base_config.copy()
     config["learning_rate"] = lr
     config["iters"] = iters
 
-    train_section(refiner_model, desc_model, desc_labels, refiner_loss, config)
+    train_section(refiner_model, desc_model, gazecap_data_tensors, desc_labels,
+                  refiner_loss, config)
+
+  coord.request_stop()
+  coord.join(threads)
