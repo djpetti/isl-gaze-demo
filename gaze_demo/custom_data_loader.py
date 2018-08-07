@@ -1,3 +1,5 @@
+import tensorflow as tf
+
 from pipeline import data_loader
 
 
@@ -27,4 +29,22 @@ class _GazeLoaderWithPose(_GazeLoader):
     features.add_feature("pose", tf.FixedLenFeature([3], tf.float32))
     return features
 
-class TrainDataLoader(data_loader.TrainDataLoader, _GazeLoader)
+class TrainDataLoader(data_loader.TrainDataLoader, _GazeLoader):
+  """ TrainDataLoader for gaze recognition tasks. """
+
+  pass
+
+class TestDataLoader(data_loader.TestDataLoader, _GazeLoader):
+  """ TestDataLoader for gaze recognition tasks. """
+
+  pass
+
+class TrainDataLoaderWithPose(data_loader.TrainDataLoader, _GazeLoaderWithPose):
+  """ TrainDataLoader for gaze recognition tasks with head pose. """
+
+  pass
+
+class TestDataLoaderWithPose(data_loader.TestDataLoader, _GazeLoaderWithPose):
+  """ TestDataLoader for gaze recognition tasks with head pose. """
+
+  pass

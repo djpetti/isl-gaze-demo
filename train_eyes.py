@@ -41,8 +41,8 @@ import numpy as np
 
 import tensorflow as tf
 
-from gaze_demo import config
-from gaze_demo.pipeline import data_loader, preprocess, keras_utils
+from gaze_demo import config, custom_data_loader
+from gaze_demo.pipeline import preprocess, keras_utils
 
 
 batch_size = 64
@@ -251,10 +251,11 @@ def build_pipeline(train_data, test_data):
   Returns:
     The fused output nodes from the loaders, in order: leye, reye, face, grid,
     dots. """
-  train_loader = data_loader.TrainDataLoader(train_data, batch_size,
-                                             raw_shape)
-  test_loader = data_loader.TestDataLoader(test_data, batch_size,
-                                           raw_shape)
+  train_loader_class = custom_data_loader.TrainDataLoaderWithPose
+  test_loader_class = custom_data_loader.TestDataLoaderWithPose
+
+  train_loader = train_loader_class(train_data, batch_size, raw_shape)
+  test_loader = test_loader_class(test_data, batch_size, raw_shape)
 
   train_pipelines = add_train_stages(train_loader)
   test_pipelines = add_test_stages(test_loader)

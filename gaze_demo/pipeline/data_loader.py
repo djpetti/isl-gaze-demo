@@ -1,3 +1,4 @@
+import collections
 import os
 
 import tensorflow as tf
@@ -23,7 +24,7 @@ class FeatureSet(object):
   """ Defines a set of features that we want to load and process from the file.
   """
 
-  def __init__(prefix, self):
+  def __init__(self, prefix):
     """
     Args:
       prefix: The prefix to use for all feature names. """
@@ -32,21 +33,21 @@ class FeatureSet(object):
     # The feature specifications.
     self.__feature_specs = {}
     # The actual set of feature tensors.
-    self.__features = {}
+    self.__features = collections.OrderedDict()
 
-    # List of feature names.
-    self.__feature_names = set()
+    # Set of feature names.
+    self.__feature_names = collections.OrderedDict()
 
   def add_feature(self, name, feature):
     """ Adds a feature to the set.
     Args:
       name: The name of the feature to add.
       feature: The TensorFlow feature. """
-    self.__feature_names.add(name)
-
     # Add the prefix.
     full_name = "%s/%s" % (self.__prefix, name)
     self.__feature_specs[full_name] = feature
+
+    self.__feature_names[full_name] = name
 
   def parse_from(self, batch):
     """ Parses all the features that were added.
@@ -60,11 +61,17 @@ class FeatureSet(object):
       The full set of features. """
     return self.__features.copy()
 
+  def get_feature_tensors(self):
+    """
+    Returns:
+      A list of the feature tensors. """
+    return self.__features.values()
+
   def get_feature_names(self):
     """
     Returns:
       A set of the names of all the features. """
-    return self.__feature_names.copy()
+    return self.__feature_names.values()
 
   def get_feature_by_name(self, name):
     """ Gets a featue by its name. (Without the prefix.)
@@ -75,6 +82,28 @@ class FeatureSet(object):
     # Add the prefix.
     full_name = "%s/%s" % (self.__prefix, name)
     return self.__features[full_name]
+
+  def copy_from(self, new_tensors):
+    """ Makes a copy of this feature set with new corresponding feature tensors.
+    Args:
+      new_tensors: A list of the new feature tensors. It assumes these are in an
+                   order corresponding to the order returned by
+                   get_feature_tensors.
+    Returns:
+      The copied feature set. """
+    # Make a new set.
+    new_set = FeatureSet(self.__prefix)
+
+    # Copy the feature specifications.
+    new_set.__feature_specs = self.__feature_specs.copy()
+    new_set.__feature_names = self.__feature_names.copy()
+
+    # Add the feature tensors.
+    names = self.__features.keys()
+    for name, tensor in zip(names, new_tensors):
+      new_set.__features[name] = tensor
+
+    return new_set
 
 
 class DataLoader(object):
@@ -98,12 +127,17 @@ class DataLoader(object):
     # Create a default preprocessing pipeline.
     self.__pipeline = preprocess.Pipeline()
 
-  def __decode_and_preprocess(self):
+  def __decode_and_preprocess(self, feature_tensors):
     """ Target for map_fn that decodes and preprocesses individual images.
+    Args:
+      feature_tensors: Individual feature tensors passed in by map_fn.
     Returns:
       A list of the preprocessed image nodes. """
+    # Create a new feature map with the individual feature tensors.
+    single_features = self._features.copy_from(feature_tensors)
+
     # Find the encoded image feature.
-    jpeg = self._features.get_feature_by_name("image")
+    jpeg = single_features.get_feature_by_name("image")
 
     # Decode the image.
     image = tf.image.decode_jpeg(jpeg[0])
@@ -111,7 +145,7 @@ class DataLoader(object):
     image = tf.reshape(image, self._image_shape)
 
     # Create a data point object.
-    data_point = DataPoint(features)
+    data_point = DataPoint(single_features)
     # Use the decoded image instead of the encoded one.
     data_point.image = image
 
@@ -120,14 +154,6 @@ class DataLoader(object):
 
   def __build_loader_stage(self):
     """ Builds the pipeline stages that actually loads data from the disk. """
-    feature = {"%s/dots" % (prefix): tf.FixedLenFeature([2], tf.float32),
-               "%s/face_size" % (prefix): tf.FixedLenFeature([2], tf.float32),
-               "%s/leye_box" % (prefix): tf.FixedLenFeature([4], tf.float32),
-               "%s/reye_box" % (prefix): tf.FixedLenFeature([4], tf.float32),
-               "%s/grid_box" % (prefix): tf.FixedLenFeature([4], tf.float32),
-               "%s/pose" % (prefix): tf.FixedLenFeature([3], tf.float32),
-               "%s/image" % (prefix): tf.FixedLenFeature([1], tf.string)}
-
     # Create queue for filenames, which is a little silly since we only have one
     # file.
     filename_queue = tf.train.string_input_producer([self._records_file])
@@ -195,17 +221,18 @@ class DataLoader(object):
     Args:
       prefix: The prefix that is used for the feature names. """
     # Initialize the feature set.
-    self._init_feature_set(prefix)
+    self._features = self._init_feature_set(prefix)
 
     # Build the loader stage.
-    self.__build_loader_stage(prefix)
+    self.__build_loader_stage()
 
     # Tensorflow expects us to tell it the shape of the output beforehand, so we
     # need to compute that.
     dtype = [tf.float32] * self.__pipeline.get_num_outputs()
     # Decode and pre-process in parallel.
-    images = tf.map_fn(self.__decode_and_preprocess, dtype=dtype,
-                       back_prop=False, parallel_iterations=16)
+    feature_tensors = self._features.get_feature_tensors()
+    images = tf.map_fn(self.__decode_and_preprocess, feature_tensors,
+                       dtype=dtype, back_prop=False, parallel_iterations=16)
 
     # Create the batches.
     dots = self._features.get_feature_by_name("dots")

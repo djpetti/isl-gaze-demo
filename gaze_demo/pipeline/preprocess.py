@@ -418,7 +418,7 @@ class HeadPoseStage(PipelineStage):
   pose, and the original face crop. """
 
   def build(self, data_point):
-    return (data_point.head_pose, data_point.image)
+    return (data_point.pose, data_point.image)
 
   def get_num_outputs(self):
     return 2
