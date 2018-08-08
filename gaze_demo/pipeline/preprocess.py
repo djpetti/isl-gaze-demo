@@ -7,6 +7,11 @@ import tensorflow as tf
 class Pipeline(object):
   """ A linear sequence of stages that perform operations on an input. """
 
+  # Magic number that we use to differentiate pipeline instances. For our
+  # purposes, if two references point to the same underlying object, they are
+  # the same.
+  _instance_number = 0
+
   def __init__(self):
     # This keeps track of the pipeline output.
     self.__output = None
@@ -14,6 +19,26 @@ class Pipeline(object):
     self.__stages = []
     # Keeps track of any pipelines that this one feeds into.
     self.__sub_pipelines = []
+
+    # Local instance number copy.
+    self.__instance_number = Pipeline._instance_number
+    Pipeline._instance_number += 1
+
+  def __copy__(self):
+    # We choose not to allow copying pipeline, because invariably this isn't
+    # going to work the way you want it to.
+    raise NotImplementedError("Copying pipelines is not supported.")
+
+  def __deepcopy__(self, memodict={}):
+    return self.__copy__()
+
+  def __eq__(self, other):
+    return self.__instance_number == other.__instance_number
+
+  def __hash__(self):
+    # Get the hash value from the underlying object, instead of just the
+    # reference.
+    return hash(self.__instance_number)
 
   def __build_stage(self, stage):
     """ Builds a single stage of the pipeline.

@@ -1,4 +1,5 @@
-from ..pipeline import data_loader, keras_utils, preprocess
+from .. import custom_data_loader
+from ..pipeline import keras_utils, preprocess
 
 class PipelineBuilder(object):
   """ Responsible for building and configuring input pipelines. """
@@ -45,10 +46,11 @@ class PipelineBuilder(object):
     # Fuse the outputs.
     return keras_utils.fuse_loaders(train_outputs, test_outputs)
 
-  def __add_train_stages(self, loader):
+  def __add_train_stages(self, loader, has_pose):
     """ Convenience function to configure train loader.
     Args:
       loader: The DataLoader to configure.
+      has_pose: Whether our dataset contains head pose data.
     Returns:
       A tuple of the pipelines created for the loader. """
     pipeline = loader.get_pipeline()
@@ -99,19 +101,25 @@ class PipelineBuilder(object):
     reye.add(resize_stage)
     face.add(resize_stage)
 
-    # Pose extraction.
-    pose_stage = preprocess.HeadPoseStage()
-    pose, face = face.add(pose_stage)
+    ret = (leye, reye, face, mask)
+
+    if has_pose:
+      # Pose extraction.
+      pose_stage = preprocess.HeadPoseStage()
+      pose, face = face.add(pose_stage)
+
+      ret = (leye, reye, face, mask, pose)
 
     # Build the loader graph.
     loader.build()
 
-    return (leye, reye, face, mask, pose)
+    return ret
 
-  def __add_test_stages(self, loader):
+  def __add_test_stages(self, loader, has_pose):
     """ Convenience function to configure test and validation loaders.
     Args:
       loader: The DataLoader to configure.
+      has_pose: Whether our dataset contains head pose data.
     Returns:
       A tuple of the pipelines created for the loader. """
     pipeline = loader.get_pipeline()
@@ -147,30 +155,43 @@ class PipelineBuilder(object):
     reye.add(resize_stage)
     face.add(resize_stage)
 
-    # Pose extraction.
-    pose_stage = preprocess.HeadPoseStage()
-    pose, face = face.add(pose_stage)
+    ret = (leye, reye, face, mask)
+
+    if has_pose:
+      # Pose extraction.
+      pose_stage = preprocess.HeadPoseStage()
+      pose, face = face.add(pose_stage)
+
+      ret = (leye, reye, face, mask, pose)
 
     # Build the loader graph.
     loader.build()
 
-    return (leye, reye, face, mask, pose)
+    return ret
 
-  def build_pipeline(self, train_data, test_data):
+  def build_pipeline(self, train_data, test_data, has_pose=False):
     """ Builds the preprocessing pipeline.
     Args:
       train_data: The training data TFRecords file.
       test_data: The testing data TFRecords file.
+      has_pose: Whether or not a head pose attribute is included in the data.
     Returns:
       The fused output nodes from the loaders, in order: leye, reye, face, grid,
       dots. """
-    train_loader = data_loader.TrainDataLoader(train_data, self.__batch_size,
-                                               self.__raw_shape)
-    test_loader = data_loader.TestDataLoader(test_data, self.__batch_size,
-                                             self.__raw_shape)
+    train_loader_class = custom_data_loader.TrainDataLoader
+    test_loader_class = custom_data_loader.TestDataLoader
+    if has_pose:
+      # Use loaders with pose attribute support.
+      train_loader_class = custom_data_loader.TrainDataLoaderWithPose
+      test_loader_class = custom_data_loader.TestDataLoaderWithPose
 
-    train_pipelines = self.__add_train_stages(train_loader)
-    test_pipelines = self.__add_test_stages(test_loader)
+    train_loader = train_loader_class(train_data, self.__batch_size,
+                                      self.__raw_shape)
+    test_loader = test_loader_class(test_data, self.__batch_size,
+                                    self.__raw_shape)
+
+    train_pipelines = self.__add_train_stages(train_loader, has_pose)
+    test_pipelines = self.__add_test_stages(test_loader, has_pose)
 
     return self.__fuse_loaders(train_loader, train_pipelines,
                                test_loader, test_pipelines)

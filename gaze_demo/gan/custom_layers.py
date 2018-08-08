@@ -13,6 +13,12 @@ class _SuperLayer(Layer):
       layers: The sublayers for this layer. """
     self.__layers = layers
 
+    # Build all the sub-layers.
+    sub_layer_input_shape = input_shape
+    for layer in self.__layers:
+      layer.build(sub_layer_input_shape)
+      sub_layer_input_shape = layer.compute_output_shape(sub_layer_input_shape)
+
     super(_SuperLayer, self).build(input_shape)
 
   def call(self, inputs):
@@ -65,8 +71,7 @@ class Residual(Layer):
   def __init__(self, wrapped_layer, *args, **kwargs):
     """
     Args:
-      wrapped_lay: ng, S. Ren, and J. Sun.  Deep resid-
-      ual learning for image recognition.The layer we are wrapping in the residual module. """
+      wrapped_layer: The layer we are wrapping in the residual module. """
     super(Residual, self).__init__(*args, **kwargs)
 
     self.__layer = wrapped_layer
@@ -75,8 +80,6 @@ class Residual(Layer):
     """ Initializes the residual module.
     Args:
       input_shape: The shape of the input to the module. """
-    super(Residual, self).build(input_shape)
-
     # The internal layer has to be built as well for this to work.
     self.__layer.build(input_shape)
 
@@ -92,6 +95,8 @@ class Residual(Layer):
 
     # Post-addition activation layer.
     self.__activation = layers.Activation("relu")
+
+    super(Residual, self).build(input_shape)
 
   def call(self, inputs):
     """ Actually adds to the graph for the layer.
@@ -191,5 +196,3 @@ class ResNetBlock(_SuperLayer):
     layer = Residual(_ResNetConvBlock(*self.__conv_args, **self.__conv_kwargs))
 
     super(ResNetBlock, self).build(input_shape, [layer])
-
-

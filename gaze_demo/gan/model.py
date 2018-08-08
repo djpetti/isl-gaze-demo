@@ -30,21 +30,44 @@ class RefinerNetwork(GanNetwork):
   def _build_custom(self):
     # Convolutional layers.
     conv1 = layers.Conv2D(64, (3, 3), padding="SAME", activation="relu")
-    block1 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
-    block2 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
-    block3 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
-    block4 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    #block1 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    #block2 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    #block3 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
+    #block4 = custom_layers.ResNetBlock(64, (3, 3), activation="relu")
     conv2 = layers.Conv2D(1, (1, 1))
     out = layers.Activation("tanh")
+    relu = layers.Activation("relu")
 
     # Apply the layers.
     r1 = conv1(self._left_eye_node)
-    r2 = block1(r1)
-    r3 = block2(r2)
-    r4 = block3(r3)
-    r5 = block4(r4)
-    r6 = conv2(r5)
-    refined = out(r6)
+    #r2 = block1(r1)
+    #r3 = block2(r2)
+    #r4 = block3(r3)
+    #r5 = block4(r4)
+
+    r2 = layers.Conv2D(64, (3, 3), padding="SAME", activation="relu")(r1)
+    r3 = layers.Conv2D(64, (3, 3), padding="SAME")(r2)
+    r4 = layers.Add()([r1, r3])
+    r4 = relu(r4)
+
+    r5 = layers.Conv2D(64, (3, 3), padding="SAME", activation="relu")(r4)
+    r6 = layers.Conv2D(64, (3, 3), padding="SAME")(r5)
+    r7 = layers.Add()([r4, r6])
+    r7 = relu(r7)
+
+    r8 = layers.Conv2D(64, (3, 3), padding="SAME", activation="relu")(r7)
+    r9 = layers.Conv2D(64, (3, 3), padding="SAME")(r8)
+    r10 = layers.Add()([r7, r9])
+    r10 = relu(r10)
+
+    r11 = layers.Conv2D(64, (3, 3), padding="SAME", activation="relu")(r10)
+    r12 = layers.Conv2D(64, (3, 3), padding="SAME")(r11)
+    r13 = layers.Add()([r10, r12])
+    r13 = relu(r13)
+
+    r14 = conv2(r13)
+    #refined = out(r14)
+    refined = r14
 
     return refined
 
@@ -103,6 +126,7 @@ class AdversarialLoss(object):
     realism = self.__realism_loss(y_pred)
     regularization = self.__regularization_loss(y_true, y_pred)
 
+    return regularization
     return realism + regularization
 
   def __realism_loss(self, refined):
@@ -115,8 +139,8 @@ class AdversarialLoss(object):
     descrim_output = self.__descrim_model([refined])
 
     # Calculate cross-entropy loss. In this case, the "right" answer is all of
-    # them being fake.
-    labels = K.ones_like(descrim_output)
+    # them being real.
+    labels = K.zeros_like(descrim_output)
     loss = K.binary_crossentropy(labels, descrim_output)
 
     # Sum over all positions.

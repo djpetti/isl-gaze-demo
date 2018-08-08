@@ -1,3 +1,5 @@
+import logging
+
 import keras.backend as K
 import keras.optimizers as optimizers
 
@@ -13,7 +15,7 @@ RAW_IMAGE_SHAPE = (400, 400, 3)
 INPUT_SHAPE = (40, 40, 1)
 # Schedule to use when training the model. Each tuple contains a learning rate
 # and the number of iterations to train for at that learning rate.
-LR_SCHEDULE = [(0.001, 1000)]
+LR_SCHEDULE = [(0.00001, 1000)]
 
 
 # Configure GPU VRAM usage.
@@ -109,9 +111,7 @@ def train_section(refine_model, desc_model, gazecap_data, labels, loss,
 
   for i in range(0, iters):
     # Train the refiner model.
-    print "Starting refiner fit..."
     history = refine_model.fit(epochs=1, steps_per_epoch=ref_updates)
-    print "Done."
 
     training_loss.extend(history.history["loss"])
     logging.info("Training loss: %s" % (history.history["loss"]))
@@ -120,7 +120,7 @@ def train_section(refine_model, desc_model, gazecap_data, labels, loss,
     desc_model.fit(epochs=1, steps_per_epoch=desc_updates)
 
     # Save the trained model.
-    ref_model.save_weights(save_file + ".ref")
+    refine_model.save_weights(save_file + ".ref")
     desc_model.save_weights(save_file + ".desc")
 
   return (training_loss, testing_acc)
@@ -132,13 +132,18 @@ def train_gan(args):
   # Build input pipelines.
   builder = pipelines.PipelineBuilder(RAW_IMAGE_SHAPE, INPUT_SHAPE[:2],
                                       args.batch_size)
+  # For now, our personal dataset has head pose included, but our unlabled data
+  # doesn't.
   personal_input_tensors = builder.build_pipeline(args.personal_train_set,
-                                                  args.personal_test_set)
+                                                  args.personal_test_set,
+                                                  has_pose=True)
   gazecap_input_tensors = builder.build_pipeline(args.gazecap_train_set,
                                                  args.gazecap_test_set)
   # Discard regression labels, as those are irrelevant for this task.
   personal_data_tensors = personal_input_tensors[:5]
-  gazecap_data_tensors = gazecap_input_tensors[:5]
+  gazecap_data_tensors = gazecap_input_tensors[:4]
+  # For GazeCapture, we don't have a pose input, so add a placeholder.
+  gazecap_data_tensors += (None,)
 
   # Build the refiner model.
   refiner = model.RefinerNetwork(INPUT_SHAPE,
