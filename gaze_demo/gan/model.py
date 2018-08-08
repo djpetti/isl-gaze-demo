@@ -1,5 +1,4 @@
 from keras.models import Model
-import keras.backend as K
 import keras.layers as layers
 
 from .. import network
@@ -73,75 +72,3 @@ class DescriminatorNetwork(GanNetwork):
     logits = conv5(d5)
 
     return logits
-
-
-class AdversarialLoss(object):
-  """ This is a custom loss function for the GAN. We implement it as a callable
-  class instead of a normal function because it needs some extra state. """
-
-  def __init__(self, descrim_model, scale):
-    """
-    Args:
-      descrim_model: The model to use for determining whether an image is real
-                     or synthetic.
-      scale: The scale factor for the regularization. """
-    self.__descrim_model = descrim_model
-    self.__reg_scale = scale
-
-  @property
-  def __name__(self):
-    """ Keras expects this to be a function with a __name__ attribute, so we
-    have to add one.
-    Returns:
-      The name of the class. """
-    return self.__class__.__name__
-
-  def __call__(self, y_true, y_pred):
-    """ Implements the GAN loss.
-    Args:
-      y_true: It expects this to be the original (unrefined) images.
-      y_pred: It expects this to be the refined images.
-    Returns:
-      A value for the overall loss. """
-    realism = self.__realism_loss(y_pred)
-    regularization = self.__regularization_loss(y_true, y_pred)
-
-    return regularization
-    return realism + regularization
-
-  def __realism_loss(self, refined):
-    """ Calculates the value of the realism term.
-    Args:
-      refined: The refined images.
-    Returns:
-      The value of the realism loss for these images. """
-    # Get the descriminator classification.
-    descrim_output = self.__descrim_model([refined])
-
-    # Calculate cross-entropy loss. In this case, the "right" answer is all of
-    # them being real.
-    labels = K.zeros_like(descrim_output)
-    loss = K.binary_crossentropy(labels, descrim_output)
-
-    # Sum over all positions.
-    loss = K.sum(loss, axis=3)
-    loss = K.sum(loss, axis=2)
-    loss = K.sum(loss, axis=1)
-
-    return loss
-
-  def __regularization_loss(self, raw, refined):
-    """ Calculates the value of the regularization term.
-    Args:
-      raw: The raw inputs to the refiner network.
-      refined: The outputs from the refiner network.
-    Returns:
-      The value of the regularization loss for these images. """
-    # Take the L1 norm.
-    norm = K.abs(refined - raw)
-    norm = K.sum(norm, axis=3)
-    norm = K.sum(norm, axis=2)
-    norm = K.sum(norm, axis=1)
-
-    # Scale the loss.
-    return self.__reg_scale * norm

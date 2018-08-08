@@ -30,8 +30,21 @@ def parse_args():
       help="Number of times to update descriminator each iteration.")
   parser.add_argument("--reg_scale", type=float, default=1.0,
                       help="Scale factor for regularization loss.")
-  parser.add_argument("--batch_size", type=int, default=64,
+  parser.add_argument("--batch_size", type=int, default=256,
                       help="The batch size to use when training.")
+
+  parser.add_argument("--initial_ref_updates", type=int, default=1000,
+      help="No. of times to update the refiner initially with only reg loss.")
+  parser.add_argument("--initial_desc_updates", type=int, default=200,
+      help="No. of times to update the descriminator initially.")
+  parser.add_argument("--initial_ref_lr", type=float, default=0.00001,
+                      help="Learning rate for initial ref update.")
+  parser.add_argument("--initial_desc_lr", type=float, default=0.01,
+                      help="Learning rate for initial desc update.")
+  parser.add_argument("--initial_ref_momentum", type=float, default=0.9,
+                      help="Momentum for initial ref update.")
+  parser.add_argument("--initial_desc_momentum", type=float, default=0.9,
+                      help="Momentum for initial desc update.")
 
   return parser.parse_args()
 

@@ -5,6 +5,7 @@ import keras.optimizers as optimizers
 
 import tensorflow as tf
 
+import losses
 import model
 import pipelines
 
@@ -15,7 +16,7 @@ RAW_IMAGE_SHAPE = (400, 400, 3)
 INPUT_SHAPE = (40, 40, 1)
 # Schedule to use when training the model. Each tuple contains a learning rate
 # and the number of iterations to train for at that learning rate.
-LR_SCHEDULE = [(0.00001, 1000)]
+LR_SCHEDULE = [(0.001, 1000)]
 
 
 # Configure GPU VRAM usage.
@@ -104,7 +105,7 @@ def train_section(refine_model, desc_model, gazecap_data, labels, loss,
   refine_model.compile(optimizer=ref_opt, loss=loss,
                        metrics=[loss], target_tensors=refiner_inputs)
   desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
-                     target_tensors=[labels])
+                     target_tensors=[labels], metrics=["accuracy"])
 
   training_loss = []
   testing_acc = []
@@ -124,6 +125,43 @@ def train_section(refine_model, desc_model, gazecap_data, labels, loss,
     desc_model.save_weights(save_file + ".desc")
 
   return (training_loss, testing_acc)
+
+def train_initial(refine_model, desc_model, gazecap_data, labels, args):
+  """ Performs initial training on the two models.
+  Args:
+    refine_model: The refiner model to train.
+    desc_model: The descriminator model to train.
+    gazecap_data: Input tensors for the refiner network.
+    labels: Tensor of the labels for the descriminator model.
+    args: Parsed CLI arguments. """
+  logging.info("Performing initial training.")
+
+  ref_updates = args.initial_ref_updates
+  ref_lr = args.initial_ref_lr
+  ref_momentum = args.initial_ref_momentum
+  desc_updates = args.initial_desc_updates
+  desc_lr = args.initial_desc_lr
+  desc_momentum = args.initial_desc_momentum
+
+  # We only use the left eye input for now.
+  refiner_inputs = gazecap_data[:1]
+
+  # Create a pure regularization loss for initial refiner training.
+  ref_loss = losses.RegularizationLoss(1.0)
+  # Compile the refiner.
+  ref_opt = optimizers.SGD(lr=ref_lr, momentum=ref_momentum)
+  refine_model.compile(optimizer=ref_opt, loss=ref_loss,
+                       target_tensors=refiner_inputs)
+
+  # Compile the descriminator.
+  desc_opt = optimizers.SGD(lr=desc_lr, momentum=desc_momentum)
+  desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
+                     target_tensors=[labels])
+
+  # Perform the initial refiner updates.
+  refine_model.fit(epochs=1, steps_per_epoch=ref_updates)
+  # Perform the initial descriminator updates.
+  desc_model.fit(epochs=1, steps_per_epoch=desc_updates, metrics=["accuracy"])
 
 def train_gan(args):
   """ Initializes and performs the entire training procedure.
@@ -156,7 +194,7 @@ def train_gan(args):
                                           refiner_model)
 
   # Create loss for refiner network.
-  refiner_loss = model.AdversarialLoss(desc_model, args.reg_scale)
+  refiner_loss = losses.CombinedLoss(desc_model, args.reg_scale)
 
   # Create a coordinator and run queues.
   coord = tf.train.Coordinator()
@@ -166,6 +204,10 @@ def train_gan(args):
   base_config = {"momentum": args.momentum, "save_file": args.output,
                  "ref_updates": args.ref_updates,
                  "desc_updates": args.desc_updates}
+
+  # Perform initial training.
+  train_initial(refiner_model, desc_model, gazecap_data_tensors, desc_labels,
+                args)
 
   # Train the model.
   for lr, iters in LR_SCHEDULE:
