@@ -1,4 +1,7 @@
 import keras.backend as K
+import keras.metrics as metrics
+
+import utils
 
 
 class _Loss(object):
@@ -43,7 +46,7 @@ class RealismLoss(_Loss):
 
     # Calculate cross-entropy loss. In this case, the "right" answer is all of
     # them being real.
-    labels = K.zeros_like(descrim_output)
+    labels = utils.make_real_labels(descrim_output.shape)
     loss = K.binary_crossentropy(labels, descrim_output)
 
     # Sum over all positions.

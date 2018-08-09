@@ -39,7 +39,7 @@ def parse_args():
       help="No. of times to update the descriminator initially.")
   parser.add_argument("--initial_ref_lr", type=float, default=0.00001,
                       help="Learning rate for initial ref update.")
-  parser.add_argument("--initial_desc_lr", type=float, default=0.01,
+  parser.add_argument("--initial_desc_lr", type=float, default=0.001,
                       help="Learning rate for initial desc update.")
   parser.add_argument("--initial_ref_momentum", type=float, default=0.9,
                       help="Momentum for initial ref update.")

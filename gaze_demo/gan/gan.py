@@ -8,15 +8,16 @@ import tensorflow as tf
 import losses
 import model
 import pipelines
+import utils
 
 
 # The shape that we expect for raw images loaded from the disk.
 RAW_IMAGE_SHAPE = (400, 400, 3)
 # The shape of the images that are inputs to the networks.
-INPUT_SHAPE = (40, 40, 1)
+INPUT_SHAPE = (44, 44, 1)
 # Schedule to use when training the model. Each tuple contains a learning rate
 # and the number of iterations to train for at that learning rate.
-LR_SCHEDULE = [(0.001, 1000)]
+LR_SCHEDULE = [(0.00001, 1000)]
 
 
 # Configure GPU VRAM usage.
@@ -58,8 +59,8 @@ def build_descrim(labeled_inputs, unlabeled_inputs, refiner):
   # Compute size of the labels tensor.
   labels_shape = desc_model.compute_output_shape(left_eye_labeled.get_shape())
   # Create initial labels tensor.
-  labels_true = tf.ones(labels_shape)
-  labels_fake = tf.zeros(labels_shape)
+  labels_true = utils.make_real_labels(labels_shape)
+  labels_fake = utils.make_fake_labels(labels_shape)
   labels = tf.concat([labels_true, labels_fake], 0)
   # Shuffle the labels.
   labels = tf.gather(labels, shuffled_indices)
@@ -121,8 +122,9 @@ def train_section(refine_model, desc_model, gazecap_data, labels, loss,
     desc_model.fit(epochs=1, steps_per_epoch=desc_updates)
 
     # Save the trained model.
-    refine_model.save_weights(save_file + ".ref")
-    desc_model.save_weights(save_file + ".desc")
+    if i % 100 == 0:
+      refine_model.save_weights(save_file + ".ref")
+      desc_model.save_weights(save_file + ".desc")
 
   return (training_loss, testing_acc)
 
@@ -156,12 +158,12 @@ def train_initial(refine_model, desc_model, gazecap_data, labels, args):
   # Compile the descriminator.
   desc_opt = optimizers.SGD(lr=desc_lr, momentum=desc_momentum)
   desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
-                     target_tensors=[labels])
+                     target_tensors=[labels], metrics=["accuracy"])
 
   # Perform the initial refiner updates.
   refine_model.fit(epochs=1, steps_per_epoch=ref_updates)
   # Perform the initial descriminator updates.
-  desc_model.fit(epochs=1, steps_per_epoch=desc_updates, metrics=["accuracy"])
+  desc_model.fit(epochs=1, steps_per_epoch=desc_updates)
 
 def train_gan(args):
   """ Initializes and performs the entire training procedure.
