@@ -5,10 +5,10 @@ import argparse
 from gaze_demo.gan import gan
 
 
-def parse_args():
-  """ Parses arguments passed on the command line.
+def build_parser():
+  """ Makes a parser for arguments passed on the command line.
   Returns:
-    The parsed argument structure. """
+    The parser. """
   parser = argparse.ArgumentParser(description="Train the GAN model.""")
 
   parser.add_argument("personal_train_set",
@@ -39,18 +39,20 @@ def parse_args():
       help="No. of times to update the descriminator initially.")
   parser.add_argument("--initial_ref_lr", type=float, default=0.00001,
                       help="Learning rate for initial ref update.")
-  parser.add_argument("--initial_desc_lr", type=float, default=0.001,
+  parser.add_argument("--initial_desc_lr", type=float, default=0.01,
                       help="Learning rate for initial desc update.")
   parser.add_argument("--initial_ref_momentum", type=float, default=0.9,
                       help="Momentum for initial ref update.")
   parser.add_argument("--initial_desc_momentum", type=float, default=0.9,
                       help="Momentum for initial desc update.")
 
-  return parser.parse_args()
+  return parser
 
 def main():
-  args = parse_args()
-  gan.train_gan(args)
+  parser = build_parser()
+
+  trainer = gan.GanTrainer(parser)
+  trainer.train_gan()
 
 
 if __name__ == "__main__":
