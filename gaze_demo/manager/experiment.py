@@ -10,12 +10,13 @@ class Experiment(object):
   that can be used to evaluate the model and set hyperparameters during
   training. """
 
-  def __init__(self, testing_interval, hyperparams=None):
+  def __init__(self, testing_interval, hyperparams=None, status=None):
     """
     Args:
       testing_interval: How many training iterations to run for every testing
                         iteration.
-      hyperparams: Optional custom hyperparameters to use. """
+      hyperparams: Optional custom hyperparameters to use.
+      status: Optional custom status parameters to use. """
     # Whether we want to enter the menu as soon as we can.
     self.__enter_menu = False
     self.__testing_interval = testing_interval
@@ -25,15 +26,25 @@ class Experiment(object):
     if self.__params is None:
       self.__params = params.HyperParams()
 
+    # Create status parameters.
+    self.__status = status
+    if self.__status is None:
+      self.__status = params.Status()
+
+    # Add default status parameters.
+    self.__status.add_if_not_set("iterations", 0)
+
     # Register the signal handler.
     signal.signal(signal.SIGINT, self.__handle_signal)
 
     # Create the menu tree.
     self.__menus = menu.MenuTree()
-    main_menu = menu.MainMenu(self.__params)
-    adjust_menu = menu.AdjustMenu(self.__params)
+    main_menu = menu.MainMenu(self.__params, self.__status)
+    adjust_menu = menu.AdjustMenu(self.__params, self.__status)
+    status_menu = menu.StatusMenu(self.__params, self.__status)
     self.__menus.add_menu(main_menu)
     self.__menus.add_menu(adjust_menu)
+    self.__menus.add_menu(status_menu)
 
   def __handle_signal(self, signum, frame):
     """ Handles the user hitting Ctrl+C. This is supposed to bring up the menu.
@@ -77,6 +88,10 @@ class Experiment(object):
           self.__enter_menu = False
 
         self._run_training_iteration()
+
+        # Update the iteration counter.
+        iterations = self.__status.get_value("iterations")
+        self.__status.update("iterations", iterations + 1)
 
       self._run_testing_iteration()
 

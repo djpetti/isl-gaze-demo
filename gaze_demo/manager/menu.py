@@ -7,18 +7,20 @@ class Menu(object):
   # Inidcates that we want to leave the menu system.
   CONTINUE = "ContinueTraining"
 
-  def __init__(self, name, params):
+  def __init__(self, name, hyper, status):
     """
     Args:
       name: The name of the menu.
-      params: The hyperparameters that we can update with the menu. """
+      hyper: The hyperparameters that we can update with the menu.
+      status: The status values that we can read with the menu. """
     self.__name = name
-    self._params = params
+    self._params = hyper
+    self._status = status
 
     # No options currently in the menu.
     self.__options = {}
 
-  def __print_menu(self):
+  def _print_menu(self):
     """ Prints the menu for the user to see. """
     # Create header line.
     header = "%s Menu:" % (self.__name)
@@ -64,7 +66,7 @@ class Menu(object):
     Returns:
       The return value of the command callback. """
     # Display the menu.
-    self.__print_menu()
+    self._print_menu()
 
     # Wait for input.
     selection = None
@@ -148,11 +150,13 @@ class MenuTree(object):
 class MainMenu(Menu):
   """ Represents the main menu. """
 
-  def __init__(self, params):
-    super(MainMenu, self).__init__("main", params)
+  def __init__(self, hyper, status):
+    super(MainMenu, self).__init__("main", hyper, status)
 
     # Adjusts a hyperparameter.
     self.add_option("a", "Adjust hyper-parameters", self.__adjust)
+    # Shows the status menu.
+    self.add_option("s", "Show status", self.__status)
     # Continues training.
     self.add_option("c", "Continue training", self.__continue)
     # Exits the training program.
@@ -170,11 +174,15 @@ class MainMenu(Menu):
     """ Goes to the hyperparameter adjustment menu. """
     return "adjust"
 
+  def __status(self, *args):
+    """ Goes to the status display menu. """
+    return "status"
+
 class AdjustMenu(Menu):
   """ Represents the hyperparameter adjustment menu. """
 
-  def __init__(self, params):
-    super(AdjustMenu, self).__init__("adjust", params)
+  def __init__(self, hyper, status):
+    super(AdjustMenu, self).__init__("adjust", hyper, status)
 
     self.__used_names = set()
     # Maps option names to hyperparameter names.
@@ -233,3 +241,21 @@ class AdjustMenu(Menu):
 
     # Stay on the same menu.
     return self.get_name()
+
+class StatusMenu(Menu):
+  """ Menu that allows the user to query the status of the experiment. """
+
+  def __init__(self, hyper, status):
+    super(StatusMenu, self).__init__("status", hyper, status)
+
+  def _print_menu(self):
+    super(StatusMenu, self)._print_menu()
+
+    # This menu has no options, really. It just displays things, in this case,
+    # all the status parameters.
+    names = self._status.get_all()
+
+    print ""
+    for name in names:
+      value = self._status.get_value(name)
+      print "\t%s is %s" % (name, str(value))
