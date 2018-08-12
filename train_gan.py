@@ -1,9 +1,24 @@
 #!/usr/bin/python
 
 import argparse
+import logging
 
 from gaze_demo.gan import gan
 
+
+def configure_logging():
+  """ Configure logging handlers. """
+  # Cofigure root logger.
+  root = logging.getLogger()
+  root.setLevel(logging.DEBUG)
+  stream_handler = logging.StreamHandler()
+  stream_handler.setLevel(logging.INFO)
+  formatter = logging.Formatter("%(name)s@%(asctime)s: " + \
+      "[%(levelname)s] %(message)s")
+
+  stream_handler.setFormatter(formatter)
+
+  root.addHandler(stream_handler)
 
 def build_parser():
   """ Makes a parser for arguments passed on the command line.
@@ -22,6 +37,8 @@ def build_parser():
   parser.add_argument("-o", "--output", default="gan_weights.hd5",
                       help="Output model file.")
 
+  parser.add_argument("--learning_rate", type=float, default=0.00001,
+                      help="Learning rate for training.")
   parser.add_argument("--momentum", type=float, default=0.9,
                       help="Momentum to use for training.")
   parser.add_argument("--ref_updates", type=int, default=2,
@@ -49,10 +66,11 @@ def build_parser():
   return parser
 
 def main():
+  configure_logging()
   parser = build_parser()
 
   trainer = gan.GanTrainer(parser)
-  trainer.train_gan()
+  trainer.train()
 
 
 if __name__ == "__main__":

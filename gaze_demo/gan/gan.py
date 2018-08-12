@@ -6,6 +6,8 @@ import keras.optimizers as optimizers
 
 import tensorflow as tf
 
+from ..manager import experiment, params
+
 import losses
 import model
 import pipelines
@@ -16,9 +18,6 @@ import utils
 RAW_IMAGE_SHAPE = (400, 400, 3)
 # The shape of the images that are inputs to the networks.
 INPUT_SHAPE = (44, 44, 1)
-# Schedule to use when training the model. Each tuple contains a learning rate
-# and the number of iterations to train for at that learning rate.
-LR_SCHEDULE = [(0.00001, 10000)]
 
 # Names to use for saving the initial versions of the models.
 REF_INIT_NAME = "refiner_init.hd5"
@@ -32,7 +31,10 @@ g_session = tf.Session(config=tf_config)
 K.tensorflow_backend.set_session(g_session)
 
 
-class GanTrainer(object):
+logger = logging.getLogger(__name__)
+
+
+class GanTrainer(experiment.Experiment):
   """ Responsible for training the GAN networks. """
 
   def __init__(self, parser):
@@ -41,6 +43,27 @@ class GanTrainer(object):
       parser: The CLI argument parser. """
     self.__parser = parser
     self.__args = self.__parser.parse_args()
+
+    self.__num_iters = 0
+
+    # Create hyperparameters.
+    my_params = self.__create_hyperparameters()
+
+    super(GanTrainer, self).__init__(1, hyperparams=my_params)
+
+  def __create_hyperparameters(self):
+    """ Creates a set of hyperparameters for the network. """
+    my_params = params.HyperParams()
+
+    # Set hyper-parameters.
+    my_params.add("learning_rate", self.__args.learning_rate)
+    my_params.add("momentum", self.__args.momentum)
+    my_params.add("ref_updates", self.__args.ref_updates)
+    my_params.add("desc_updates", self.__args.desc_updates)
+    my_params.add("reg_scale", self.__args.reg_scale)
+    my_params.add("batch_size", self.__args.batch_size)
+
+    return my_params
 
   def __build_descrim(self):
     """ Builds the descriminator network, along with the machinery that generates
@@ -78,65 +101,80 @@ class GanTrainer(object):
 
     return desc_model, labels
 
-  def __train_section(self, config):
-    """ Trains for a number of iterations at one learning rate.
-    Args:
-      config: A configuration dictionary. It should contain the following items:
-        learning_rate: The learning rate to train at.
-        momentum: The momentum to use for training.
-        iters: Number of iterations to train for.
-        save_file: File to save the weights to. Will have .ref or .desc appended
-                  for each model.
-        ref_updates: Number of updates to perform for the refiner every iteration.
-        desc_updates: Number of updates to perform for the descriminator every
-                      iteration.
-    Returns:
-      Training loss and testing accuracy for this section. """
-    learning_rate = config["learning_rate"]
-    momentum = config["momentum"]
-    iters = config["iters"]
-    save_file = config["save_file"]
-    ref_updates = config["ref_updates"]
-    desc_updates = config["desc_updates"]
+  def __recompile_if_needed(self):
+    """ Checks if the models need to be recompiled, and does so if necessary.
+    """
+    # Parameters that, if changed, require recompilation.
+    forces_recomp = set(["learning_rate", "momentum"])
 
-    # We only use the left eye input for now.
-    refiner_inputs = self.__gazecap_data_tensors[:1]
+    # Check which parameters changed.
+    my_params = self.get_params()
+    changed = my_params.get_changed()
+    logger.debug("Changed parameters: %s" % (changed))
 
-    print "\nTraining at %f for %d iters.\n" % (learning_rate, iters)
+    # See if we have to recompile.
+    for param in changed:
+      if param not in forces_recomp:
+        # We don't need to recompile for this.
+        continue
 
-    # Set the optimizers.
-    ref_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
-    desc_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
-    # The refiner expects its inputs to be passed as the targets.
-    self.__refiner_model.compile(optimizer=ref_opt, loss=self.__loss,
-                                 target_tensors=refiner_inputs)
-    self.__desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
-                              target_tensors=[self.__desc_labels],
-                              metrics=["accuracy"])
+      # We need to recompile.
+      learning_rate = my_params.get_value("learning_rate")
+      momentum = my_params.get_value("momentum")
 
-    training_loss = []
-    testing_acc = []
+      logger.debug("Recompiling with LR %f and momentum %f." \
+                    % (learning_rate, momentum))
 
-    for i in range(0, iters):
-      # Train the refiner model.
-      history = self.__refiner_model.fit(epochs=1, steps_per_epoch=ref_updates)
+      # We only use the left eye input for now.
+      refiner_inputs = self.__gazecap_data_tensors[:1]
 
-      training_loss.extend(history.history["loss"])
-      logging.info("Training loss: %s" % (history.history["loss"]))
+      # Set the optimizers.
+      ref_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
+      desc_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
+      # The refiner expects its inputs to be passed as the targets.
+      self.__refiner_model.compile(optimizer=ref_opt, loss=self.__loss,
+                                   target_tensors=refiner_inputs)
+      self.__desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
+                                target_tensors=[self.__desc_labels],
+                                metrics=["accuracy"])
 
-      # Train the descriminator model.
-      self.__desc_model.fit(epochs=1, steps_per_epoch=desc_updates)
+      # We only need to compile a maximum of 1 times.
+      break
 
-      # Save the trained model.
-      if i % 100 == 0:
-        self.__refiner_model.save_weights(save_file + ".ref")
-        self.__desc_model.save_weights(save_file + ".desc")
+  def _run_training_iteration(self):
+    """ Runs a single training iteration. """
+    my_params = self.get_params()
+    ref_updates = my_params.get_value("ref_updates")
+    desc_updates = my_params.get_value("desc_updates")
 
-    return (training_loss, testing_acc)
+    # First, recompile the models if need be.
+    self.__recompile_if_needed()
+
+    # Train the refiner model.
+    history = self.__refiner_model.fit(epochs=1, steps_per_epoch=ref_updates)
+
+    training_loss = history.history["loss"]
+    logger.debug("Training loss: %s" % (training_loss))
+
+    # Train the descriminator model.
+    self.__desc_model.fit(epochs=1, steps_per_epoch=desc_updates)
+
+    # Save the trained model.
+    if self.__num_iters % 100 == 0:
+      logger.info("Saving models.")
+
+      self.__refiner_model.save_weights(self.__args.output + ".ref")
+      self.__desc_model.save_weights(self.__args.output + ".desc")
+
+    self.__num_iters += 1
+
+  def _run_testing_iteration(self):
+    """ For now, this is a NOP. """
+    pass
 
   def __train_initial(self):
     """ Performs initial training on the two models. """
-    logging.info("Performing initial training.")
+    logger.info("Performing initial training.")
 
     def all_defaults():
       """ Checks whether all relevant arguments are the default values.
@@ -155,9 +193,9 @@ class GanTrainer(object):
 
     defaults = all_defaults()
     if not defaults:
-      logging.info("User has changed defaults, forcing retraining.")
+      logger.info("User has changed defaults, forcing retraining.")
     elif (os.path.exists(REF_INIT_NAME) and os.path.exists(DESC_INIT_NAME)):
-      logging.info("Using saved initial models.")
+      logger.info("Using saved initial models.")
 
       self.__refiner_model.load_weights(REF_INIT_NAME)
       self.__desc_model.load_weights(DESC_INIT_NAME)
@@ -195,12 +233,12 @@ class GanTrainer(object):
 
     if defaults:
       # Save the initial versions.
-      logging.info("Saving initial models.")
+      logger.info("Saving initial models.")
 
       self.__refiner_model.save_weights(REF_INIT_NAME)
       self.__desc_model.save_weights(DESC_INIT_NAME)
 
-  def train_gan(self):
+  def train(self):
     """ Initializes and performs the entire training procedure. """
     # Build input pipelines.
     builder = pipelines.PipelineBuilder(RAW_IMAGE_SHAPE, INPUT_SHAPE[:2],
@@ -236,22 +274,11 @@ class GanTrainer(object):
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(coord=coord, sess=g_session)
 
-    # Create configuration dict for training.
-    base_config = {"momentum": self.__args.momentum,
-                   "save_file": self.__args.output,
-                  "ref_updates": self.__args.ref_updates,
-                  "desc_updates": self.__args.desc_updates}
-
     # Perform initial training.
     self.__train_initial()
 
     # Train the model.
-    for lr, iters in LR_SCHEDULE:
-      config = base_config.copy()
-      config["learning_rate"] = lr
-      config["iters"] = iters
-
-      self.__train_section(config)
+    super(GanTrainer, self).train()
 
     coord.request_stop()
     coord.join(threads)
