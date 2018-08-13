@@ -19,6 +19,9 @@ class Menu(object):
 
     # No options currently in the menu.
     self.__options = {}
+    # Keeps track of option names that have been used when coming up with unique
+    # ones.
+    self.__used_names = set()
 
   def _print_menu(self):
     """ Prints the menu for the user to see. """
@@ -27,12 +30,35 @@ class Menu(object):
     header = header.title()
     print header
 
+    # Show the iterations counter.
+    iterations = self._status.get_value("iterations")
+    print "(Iteration %d)" % (iterations)
+
     # Display the options alphabetically.
     option_names = self.__options.keys()
     option_names.sort()
     for option in option_names:
       desc, command = self.__options[option]
       print "\t%s: %s" % (option, desc)
+
+  def _unique_shorthand(self, name):
+    """ Creates a unique shorthand for an option.
+    Args:
+      name: The name to create a shorthand for.
+    Returns:
+      The shorthand it created. """
+    shorthand = name[0]
+
+    for i in range(1, len(name)):
+      if shorthand not in self.__used_names:
+        # This is unique.
+        self.__used_names.add(shorthand)
+        return shorthand
+
+      # Add another letter.
+      shorthand += name[i]
+
+    raise ValueError("Duplicate param '%s'?" % (name))
 
   def add_option(self, option, desc, command):
     """ Adds a new option to the menu.
@@ -160,7 +186,7 @@ class MainMenu(Menu):
     # Continues training.
     self.add_option("c", "Continue training", self.__continue)
     # Exits the training program.
-    self.add_option("q", "Exit", self.__exit)
+    self.add_option("q", "Exit program", self.__exit)
 
   def __exit(self, *args):
     """ Halts training and exits the program. """
@@ -184,14 +210,13 @@ class AdjustMenu(Menu):
   def __init__(self, hyper, status):
     super(AdjustMenu, self).__init__("adjust", hyper, status)
 
-    self.__used_names = set()
     # Maps option names to hyperparameter names.
     self.__option_params = {}
 
     # Add options to adjust all hyperparameters.
     param_names = self._params.get_all()
     for name in param_names:
-      option = self.__unique_shorthand(name)
+      option = self._unique_shorthand(name)
       # Create a description that includes the current value.
       desc = self.__make_description(name)
 
@@ -206,25 +231,6 @@ class AdjustMenu(Menu):
       The description. """
     value = self._params.get_value(param_name)
     return "%s (Currently %s)" % (param_name, str(value))
-
-  def __unique_shorthand(self, name):
-    """ Creates a unique shorthand for an option.
-    Args:
-      name: The name to create a shorthand for.
-    Returns:
-      The shorthand it created. """
-    shorthand = name[0]
-
-    for i in range(1, len(name)):
-      if shorthand not in self.__used_names:
-        # This is unique.
-        self.__used_names.add(shorthand)
-        return shorthand
-
-      # Add another letter.
-      shorthand += name[i]
-
-    raise ValueError("Duplicate param '%s'?" % (name))
 
   def __adjust_param(self, option):
     """ Adjusts a hyperparameter value. """
@@ -248,14 +254,69 @@ class StatusMenu(Menu):
   def __init__(self, hyper, status):
     super(StatusMenu, self).__init__("status", hyper, status)
 
+    # Maps option names to status param names.
+    self.__option_params = {}
+
+    # Add options to view historical info about all status items.
+    param_names = self._status.get_all()
+    for name in param_names:
+      # Iteration counter is automatically displayed, so ignore it here.
+      if name == "iterations":
+        continue
+
+      option = self._unique_shorthand(name)
+      # Create a description that includes the current value.
+      desc = self.__make_description(name)
+
+      self.add_option(option, desc, self.__detailed_info)
+      self.__option_params[option] = name
+
+  def __make_description(self, param_name):
+    """ Creates a description for a parameter based on its name and value.
+    Args:
+      name: The name of the parameter.
+    Returns:
+      The description. """
+    value = self._status.get_value(param_name)
+    if round(value) != value:
+      # Parameter is a float. Limit to three decimals.
+      value = "%.3f" % (value)
+
+    return "%s (%s)" % (param_name, str(value))
+
+  def __detailed_info(self, option):
+    """ Produces detailed information about a status parameter. This includes
+    moving averages. """
+    # Get the name of the parameter.
+    name = self.__option_params[option]
+
+    # Get the historical data for the parameter.
+    history = self._status.get_history(name)
+
+    # Print moving averages.
+    window = 10
+    while window <= 10000:
+      if len(history) < window:
+        # Not enough history to compute this average.
+        print "Avg. (last %d): --" % (window)
+
+      else:
+        # Compute the average.
+        window_data = history[:window]
+        mean = sum(window_data) / float(len(window_data))
+        print "Avg. (last %d): %f" % (window, mean)
+
+      window *= 10
+
+    # Wait for the user to continue.
+    raw_input("(Press Enter to continue)")
+    # Stay on the same menu.
+    return self.get_name()
+
   def _print_menu(self):
+    # Before we print, update the current value for all the parameters.
+    for option, name in self.__option_params.iteritems():
+      desc = self.__make_description(name)
+      self.update_description(option, desc)
+
     super(StatusMenu, self)._print_menu()
-
-    # This menu has no options, really. It just displays things, in this case,
-    # all the status parameters.
-    names = self._status.get_all()
-
-    print ""
-    for name in names:
-      value = self._status.get_value(name)
-      print "\t%s is %s" % (name, str(value))

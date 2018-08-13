@@ -100,3 +100,9 @@ class Experiment(object):
     Returns:
       The hyperparameters being used for this experiment. """
     return self.__params
+
+  def get_status(self):
+    """
+    Returns:
+      The status parameters being used for this experiment. """
+    return self.__status

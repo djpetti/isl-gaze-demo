@@ -44,12 +44,13 @@ class GanTrainer(experiment.Experiment):
     self.__parser = parser
     self.__args = self.__parser.parse_args()
 
-    self.__num_iters = 0
-
     # Create hyperparameters.
     my_params = self.__create_hyperparameters()
+    # Create status parameters.
+    my_status = self.__create_status()
 
-    super(GanTrainer, self).__init__(1, hyperparams=my_params)
+    super(GanTrainer, self).__init__(1, hyperparams=my_params,
+                                     status=my_status)
 
   def __create_hyperparameters(self):
     """ Creates a set of hyperparameters for the network. """
@@ -64,6 +65,18 @@ class GanTrainer(experiment.Experiment):
     my_params.add("batch_size", self.__args.batch_size)
 
     return my_params
+
+  def __create_status(self):
+    """ Creates the status parameters for the network. """
+    my_status = params.Status()
+
+    # Add status indicators for the losses.
+    my_status.add("ref_loss", 0.0)
+    my_status.add("desc_loss", 0.0)
+    # Add status indicator for the descriminator accuracy.
+    my_status.add("desc_accuracy", 0.5)
+
+    return my_status
 
   def __build_descrim(self):
     """ Builds the descriminator network, along with the machinery that generates
@@ -147,26 +160,34 @@ class GanTrainer(experiment.Experiment):
     ref_updates = my_params.get_value("ref_updates")
     desc_updates = my_params.get_value("desc_updates")
 
+    status = self.get_status()
+
     # First, recompile the models if need be.
     self.__recompile_if_needed()
 
     # Train the refiner model.
     history = self.__refiner_model.fit(epochs=1, steps_per_epoch=ref_updates)
 
-    training_loss = history.history["loss"]
-    logger.debug("Training loss: %s" % (training_loss))
+    ref_loss = history.history["loss"][0]
+    logger.debug("Refiner loss: %f" % (ref_loss))
+    status.update("ref_loss", ref_loss)
 
     # Train the descriminator model.
-    self.__desc_model.fit(epochs=1, steps_per_epoch=desc_updates)
+    history = self.__desc_model.fit(epochs=1, steps_per_epoch=desc_updates)
+
+    desc_loss = history.history["loss"][0]
+    desc_acc = history.history["acc"][0]
+    logger.debug("Descriminator loss: %f" % (desc_loss))
+    status.update("desc_loss", desc_loss)
+    status.update("desc_accuracy", desc_acc)
 
     # Save the trained model.
-    if self.__num_iters % 100 == 0:
+    num_iters = status.get_value("iterations")
+    if num_iters % 100 == 0:
       logger.info("Saving models.")
 
       self.__refiner_model.save_weights(self.__args.output + ".ref")
       self.__desc_model.save_weights(self.__args.output + ".desc")
-
-    self.__num_iters += 1
 
   def _run_testing_iteration(self):
     """ For now, this is a NOP. """

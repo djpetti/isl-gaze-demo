@@ -1,3 +1,6 @@
+import collections
+
+
 class Params(object):
   """ Superclass for collections of numeric parameters. """
 
@@ -84,4 +87,39 @@ class HyperParams(Params):
 class Status(Params):
   """ Status indicators from the experiment. """
 
-  pass
+  # Maximum history length to store for parameters.
+  _MAX_HISTORY_LEN = 10000
+
+  def __init__(self):
+    super(Status, self).__init__()
+
+    # Maps parameters to historical value data.
+    self.__param_histories = {}
+
+  def add(self, name, value):
+    super(Status, self).add(name, value)
+
+    # We have no history at all yet.
+    self.__param_histories[name] = collections.deque()
+
+  def update(self, name, value):
+    super(Status, self).update(name, value)
+
+    # Update the parameter history.
+    self.__param_histories[name].appendleft(value)
+
+    if len(self.__param_histories[name]) > Status._MAX_HISTORY_LEN:
+      # Remove an item, since we're over the max length.
+      self.__param_histories[name].pop()
+
+  def get_history(self, name):
+    """" Gets the historical values for a parameter.
+    Args:
+      name: The name of the parameter.
+    Returns:
+      A list of the historical values for that parameter. """
+    if name not in self.__param_histories:
+      # No such parameter.
+      raise NameError("Parameter '%s' does not exist." % (name))
+
+    return list(self.__param_histories[name])
