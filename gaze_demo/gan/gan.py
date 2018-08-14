@@ -49,7 +49,8 @@ class GanTrainer(experiment.Experiment):
     # Create status parameters.
     my_status = self.__create_status()
 
-    super(GanTrainer, self).__init__(1, hyperparams=my_params,
+    super(GanTrainer, self).__init__(self.__args.testing_interval,
+                                     hyperparams=my_params,
                                      status=my_status)
 
   def __create_hyperparameters(self):
@@ -63,6 +64,8 @@ class GanTrainer(experiment.Experiment):
     my_params.add("desc_updates", self.__args.desc_updates)
     my_params.add("reg_scale", self.__args.reg_scale)
     my_params.add("batch_size", self.__args.batch_size)
+    my_params.add("ref_testing_steps", self.__args.ref_testing_steps)
+    my_params.add("desc_testing_steps", self.__args.desc_testing_steps)
 
     return my_params
 
@@ -76,7 +79,25 @@ class GanTrainer(experiment.Experiment):
     # Add status indicator for the descriminator accuracy.
     my_status.add("desc_accuracy", 0.5)
 
+    # Add status indicator for the testing losses and accuracy.
+    my_status.add("ref_testing_loss", 0.0)
+    my_status.add("desc_testing_loss", 0.0)
+    my_status.add("desc_testing_acc", 0.5)
+
     return my_status
+
+  def __denormalize_image(self, image):
+    """ Reverses the TF image normalization so that we can display the output of
+    a refiner model for human evaluation.
+    Args:
+      image: The image to denormalize.
+    Returns:
+      The same image, denormalized. """
+    image_min = tf.reduce_min(image)
+    image_shifted = image - image_min
+
+    image_max = tf.reduce_max(image_shifted)
+    return image_shifted * 255.0 / image_max
 
   def __build_descrim(self):
     """ Builds the descriminator network, along with the machinery that generates
@@ -181,21 +202,37 @@ class GanTrainer(experiment.Experiment):
 
     desc_loss = history.history["loss"][0]
     desc_acc = history.history["acc"][0]
-    logger.debug("Descriminator loss: %f" % (desc_loss))
+    logger.debug("Descriminator loss: %f, acc: %f" % (desc_loss, desc_acc))
     status.update("desc_loss", desc_loss)
     status.update("desc_accuracy", desc_acc)
 
-    # Save the trained model.
-    num_iters = status.get_value("iterations")
-    if num_iters % 100 == 0:
-      logger.info("Saving models.")
-
-      self.__refiner_model.save_weights(self.__args.output + ".ref")
-      self.__desc_model.save_weights(self.__args.output + ".desc")
-
   def _run_testing_iteration(self):
-    """ For now, this is a NOP. """
-    pass
+    """ Runs a single testing iteration. """
+    logger.info("Running test iteration.")
+
+    my_params = self.get_params()
+    ref_steps = my_params.get_value("ref_testing_steps")
+    desc_steps = my_params.get_value("desc_testing_steps")
+
+    status = self.get_status()
+
+    # Test the refiner model.
+    ref_loss = self.__refiner_model.evaluate(steps=ref_steps)
+
+    logger.info("Refiner loss: %f" % (ref_loss))
+    status.update("ref_testing_loss", ref_loss)
+
+    # Test the descriminator model.
+    desc_loss, desc_acc = self.__desc_model.evaluate(steps=desc_steps)
+
+    logger.info("Descriminator loss: %f, acc: %f" % (desc_loss, desc_acc))
+    status.update("desc_testing_loss", desc_loss)
+    status.update("desc_testing_acc", desc_acc)
+
+    # Save the trained models.
+    logger.info("Saving models.")
+    self.__refiner_model.save_weights(self.__args.output + ".ref")
+    self.__desc_model.save_weights(self.__args.output + ".desc")
 
   def __train_initial(self):
     """ Performs initial training on the two models. """

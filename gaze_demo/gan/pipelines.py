@@ -195,4 +195,3 @@ class PipelineBuilder(object):
 
     return self.__fuse_loaders(train_loader, train_pipelines,
                                test_loader, test_pipelines)
-

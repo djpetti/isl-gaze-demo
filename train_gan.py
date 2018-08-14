@@ -63,6 +63,13 @@ def build_parser():
   parser.add_argument("--initial_desc_momentum", type=float, default=0.9,
                       help="Momentum for initial desc update.")
 
+  parser.add_argument("--testing_interval", type=int, default=100,
+                      help="Interval at which to perform testing.")
+  parser.add_argument("--ref_testing_steps", type=int, default=10,
+                      help="No. of steps to run when testing the refiner.")
+  parser.add_argument("--desc_testing_steps", type=int, default=10,
+                      help="No. of steps to run when testing the descriminator.")
+
   return parser
 
 def main():
