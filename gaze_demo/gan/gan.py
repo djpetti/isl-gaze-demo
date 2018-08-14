@@ -118,7 +118,7 @@ class GanTrainer(experiment.Experiment):
     """ Checks if the models need to be recompiled, and does so if necessary.
     """
     # Parameters that, if changed, require recompilation.
-    forces_recomp = set(["learning_rate", "momentum"])
+    forces_recomp = set(["learning_rate", "momentum", "reg_scale"])
 
     # Check which parameters changed.
     my_params = self.get_params()
@@ -134,9 +134,13 @@ class GanTrainer(experiment.Experiment):
       # We need to recompile.
       learning_rate = my_params.get_value("learning_rate")
       momentum = my_params.get_value("momentum")
+      reg_scale = my_params.get_value("reg_scale")
 
-      logger.debug("Recompiling with LR %f and momentum %f." \
-                    % (learning_rate, momentum))
+      logger.info("Recompiling with LR %f and momentum %f." \
+                  % (learning_rate, momentum))
+
+      # Create loss for refiner network.
+      ref_loss = losses.CombinedLoss(self.__desc_model, reg_scale)
 
       # We only use the left eye input for now.
       refiner_inputs = self.__gazecap_data_tensors[:1]
@@ -145,7 +149,7 @@ class GanTrainer(experiment.Experiment):
       ref_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
       desc_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
       # The refiner expects its inputs to be passed as the targets.
-      self.__refiner_model.compile(optimizer=ref_opt, loss=self.__loss,
+      self.__refiner_model.compile(optimizer=ref_opt, loss=ref_loss,
                                    target_tensors=refiner_inputs)
       self.__desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
                                 target_tensors=[self.__desc_labels],
@@ -286,10 +290,6 @@ class GanTrainer(experiment.Experiment):
 
     # Create descriminator model.
     self.__desc_model, self.__desc_labels = self.__build_descrim()
-
-    # Create loss for refiner network.
-    self.__loss = losses.CombinedLoss(self.__desc_model,
-                                      self.__args.reg_scale)
 
     # Create a coordinator and run queues.
     coord = tf.train.Coordinator()
