@@ -70,6 +70,11 @@ def build_parser():
   parser.add_argument("--desc_testing_steps", type=int, default=10,
                       help="No. of steps to run when testing the descriminator.")
 
+  parser.add_argument("--example_dir", default=".",
+                      help="Directory to write example refined images to.")
+  parser.add_argument("--keep_examples", default=10,
+                      help="How many example images to write.")
+
   return parser
 
 def main():

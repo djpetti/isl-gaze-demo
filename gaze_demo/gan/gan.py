@@ -9,6 +9,7 @@ import tensorflow as tf
 from ..manager import experiment, params
 
 import losses
+import metrics
 import model
 import pipelines
 import utils
@@ -26,7 +27,7 @@ DESC_INIT_NAME = "desc_init.hd5"
 
 # Configure GPU VRAM usage.
 tf_config = tf.ConfigProto()
-tf_config.gpu_options.per_process_gpu_memory_fraction = 1.0
+tf_config.gpu_options.per_process_gpu_memory_fraction = 0.5
 g_session = tf.Session(config=tf_config)
 K.tensorflow_backend.set_session(g_session)
 
@@ -66,6 +67,7 @@ class GanTrainer(experiment.Experiment):
     my_params.add("batch_size", self.__args.batch_size)
     my_params.add("ref_testing_steps", self.__args.ref_testing_steps)
     my_params.add("desc_testing_steps", self.__args.desc_testing_steps)
+    my_params.add("keep_examples", self.__args.keep_examples)
 
     return my_params
 
@@ -86,19 +88,6 @@ class GanTrainer(experiment.Experiment):
 
     return my_status
 
-  def __denormalize_image(self, image):
-    """ Reverses the TF image normalization so that we can display the output of
-    a refiner model for human evaluation.
-    Args:
-      image: The image to denormalize.
-    Returns:
-      The same image, denormalized. """
-    image_min = tf.reduce_min(image)
-    image_shifted = image - image_min
-
-    image_max = tf.reduce_max(image_shifted)
-    return image_shifted * 255.0 / image_max
-
   def __build_descrim(self):
     """ Builds the descriminator network, along with the machinery that generates
     batches for it.
@@ -117,6 +106,8 @@ class GanTrainer(experiment.Experiment):
     shuffled_indices = tf.random_shuffle(indices)
 
     combined = tf.gather(combined, shuffled_indices)
+    # Make sure we mark this as needing the Keras learning phase parameter.
+    combined._uses_learning_phase = True
 
     # Build the model.
     desc_inputs = [combined, None, None, None, None]
@@ -139,7 +130,8 @@ class GanTrainer(experiment.Experiment):
     """ Checks if the models need to be recompiled, and does so if necessary.
     """
     # Parameters that, if changed, require recompilation.
-    forces_recomp = set(["learning_rate", "momentum", "reg_scale"])
+    forces_recomp = set(["learning_rate", "momentum", "reg_scale",
+                         "keep_examples"])
 
     # Check which parameters changed.
     my_params = self.get_params()
@@ -156,12 +148,16 @@ class GanTrainer(experiment.Experiment):
       learning_rate = my_params.get_value("learning_rate")
       momentum = my_params.get_value("momentum")
       reg_scale = my_params.get_value("reg_scale")
+      keep_examples = my_params.get_value("keep_examples")
 
       logger.info("Recompiling with LR %f and momentum %f." \
                   % (learning_rate, momentum))
 
       # Create loss for refiner network.
       ref_loss = losses.CombinedLoss(self.__desc_model, reg_scale)
+      # Create metric for saving refined images.
+      save_metric = metrics.RefinedExamples(self.__args.example_dir,
+                                            keep_examples)
 
       # We only use the left eye input for now.
       refiner_inputs = self.__gazecap_data_tensors[:1]
@@ -171,7 +167,8 @@ class GanTrainer(experiment.Experiment):
       desc_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
       # The refiner expects its inputs to be passed as the targets.
       self.__refiner_model.compile(optimizer=ref_opt, loss=ref_loss,
-                                   target_tensors=refiner_inputs)
+                                   target_tensors=refiner_inputs,
+                                   metrics=[save_metric])
       self.__desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
                                 target_tensors=[self.__desc_labels],
                                 metrics=["accuracy"])
@@ -217,7 +214,7 @@ class GanTrainer(experiment.Experiment):
     status = self.get_status()
 
     # Test the refiner model.
-    ref_loss = self.__refiner_model.evaluate(steps=ref_steps)
+    ref_loss, _ = self.__refiner_model.evaluate(steps=ref_steps)
 
     logger.info("Refiner loss: %f" % (ref_loss))
     status.update("ref_testing_loss", ref_loss)
