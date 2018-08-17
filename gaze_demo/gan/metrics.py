@@ -62,7 +62,7 @@ class RefinedExamples(_Metric):
       """ Performs the actual disk dump of the images.
       Returns:
         Always returns 0. """
-      return self.__write_batch(y_pred)
+      return self.__write_batch(y_true, y_pred)
 
     # Exit immediately if we are training.
     default_return = K.constant(1.0)
@@ -92,34 +92,40 @@ class RefinedExamples(_Metric):
     encoded = tf.image.encode_jpeg(image)
     return tf.write_file(filename, encoded)
 
-  def __write_batch(self, batch):
+  def __write_batch(self, original, refined):
     """ Denormalizes and saves an entire batch of images.
     Args:
-      batch: The batch to save. """
-    def denormalize_and_write(image_pair):
+      original: The batch of original images.
+      refined: The batch of refined images. """
+    def denormalize_and_write(image_tuple):
       """ Denormalizes a single image and writes it to the disk.
       Args:
-        image_pair: A tuple of the image and the filename. """
-      image, filename = image_pair
+        image_tuple: A tuple of the refined image, original image, and the
+                     filename. """
+      ref_image, orig_image, filename = image_tuple
 
       # Denormalize.
-      image_denorm = self.__denormalize_image(image)
+      ref_image_denorm = self.__denormalize_image(ref_image)
+      orig_image_denorm = self.__denormalize_image(orig_image)
       # Convert to uint8.
-      image_denorm = tf.cast(image_denorm, tf.uint8)
+      ref_image_denorm = tf.cast(ref_image_denorm, tf.uint8)
+      orig_image_denorm = tf.cast(orig_image_denorm, tf.uint8)
       # Write.
-      write_op = self.__save_image(image_denorm, filename)
+      ref_write_op = self.__save_image(ref_image_denorm, filename)
+      orig_write_op = self.__save_image(orig_image_denorm, filename + ".orig")
 
       # We need to force the write op to execute, so we link it to our constant
       # output.
-      with self.__graph.control_dependencies([write_op]):
+      with self.__graph.control_dependencies([ref_write_op, orig_write_op]):
         ret = tf.constant(0.0)
 
       return ret
 
     # Only take the part of the batch that we need.
-    save_part = batch[:self.__max_to_write]
+    refined_part = refined[:self.__max_to_write]
+    original_part = refined[:self.__max_to_write]
 
     outputs = tf.map_fn(denormalize_and_write,
-                        (save_part, self.__image_names),
+                        (refined_part, original_part, self.__image_names),
                         dtype=tf.float32)
     return tf.reduce_sum(outputs)
