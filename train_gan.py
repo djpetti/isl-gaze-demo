@@ -75,6 +75,9 @@ def build_parser():
   parser.add_argument("--keep_examples", default=10,
                       help="How many example images to write.")
 
+  parser.add_argument("--buffer_size", type=int, default=1024,
+                      help="Size of the buffer of past refined images.")
+
   return parser
 
 def main():

@@ -1,4 +1,4 @@
-import keras.optimizers as optimizers
+import keras.layers as layers
 
 import tensorflow as tf
 
@@ -12,7 +12,8 @@ class ImageBuffer(object):
       size: The number of images that the buffer holds.
       image_shape: The 3D shape of the images in the buffer. """
     # Create a variable to store the images.
-    self.__buffer = tf.Variable(name="buffer")
+    buffer_shape = (size,) + tuple(image_shape)
+    self.__buffer = tf.Variable(tf.zeros(buffer_shape), name="buffer")
     # The update op for the buffer, when we have one.
     self.__buffer_update = None
 
@@ -40,7 +41,11 @@ class ImageBuffer(object):
     """ Replaces a set of random images from the buffer with images that were
     passed in.
     Args:
-      new_images: The images to replace with. """
+      new_images: The images to replace with.
+    Returns:
+      The buffer update operation. """
+    my_buffer = self.__get_buffer()
+
     # Randomly select the images to keep.
     shuffled = tf.random_shuffle(my_buffer)
     num_to_keep = self.__get_buffer().shape[0] - new_images.shape[0]
@@ -50,30 +55,4 @@ class ImageBuffer(object):
     new_buffer = tf.concat([new_images, keep], 0)
     self.__buffer_update = self.__buffer.assign(new_buffer)
 
-  def get_updates(self):
-    """ Gets the variables that need to be updated after every training
-    iteration for the buffer to work correctly.
-    Returns:
-      A list of these variables. """
-    return [self.__buffer_update]
-
-def BufferSGD(optimizers.SGD):
-  """ Since the buffer needs to update variables, we have to use a special
-  optimizer that tells Keras to update these variables. """
-
-  def __init__(my_buffer, *args, **kwargs):
-    """
-    Args:
-      my_buffer: The buffer that we want to update.
-      All other arguments will be passed transparently to the superclass. """
-    self.__buffer = my_buffer
-
-    super(BufferSGD, self).__init__(*args, **kwargs)
-
-  def get_updates(self, *args, **kwargs):
-    """ Wrapper around the superclass method. """
-    updates = super(BufferSGD, self).get_updates(*args, **kwargs)
-
-    # Add our special update.
-    updates.extend(self.__buffer.get_updates())
-    return updates
+    return self.__buffer_update

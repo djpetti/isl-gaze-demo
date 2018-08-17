@@ -1,8 +1,6 @@
 import keras.backend as K
 import keras.layers as layers
 
-import tensorflow as tf
-
 
 def fuse_loaders(train_outputs, test_outputs):
   """ Keras is capable of loading data and labels from custom tensors. However,
@@ -17,10 +15,6 @@ def fuse_loaders(train_outputs, test_outputs):
   # We have to combine them on a tensor-by-tensor basis.
   for train_output, test_output in zip(train_outputs, test_outputs):
     fused_output = K.in_train_phase(train_output, test_output)
-
-    is_train = K.learning_phase()
-    fused_output = tf.Print(fused_output, data=[is_train], message="Phase: ")
-
     fused_outputs.append(fused_output)
 
   return fused_outputs
