@@ -7,6 +7,8 @@ import keras.regularizers as regularizers
 
 import tensorflow as tf
 
+from pipeline import keras_utils
+
 
 class Network(object):
   """ Represents a network. """
@@ -35,6 +37,17 @@ class Network(object):
 
   def _build_common(self):
     """ Build the network components that are common to all. """
+    def input_creator(tensor):
+      """ Chooses the input layer creator function to use.
+      Args:
+        tensor: Optional input tensor to use. """
+      if tensor is not None:
+        # We want to use the pipeline input creator.
+        return keras_utils.pipeline_input
+      else:
+        # Use the normal creator.
+        return layers.Input
+
     # L2 regularizer for weight decay.
     self._l2 = regularizers.l2(0.0005)
 
@@ -47,15 +60,20 @@ class Network(object):
       leye, reye, face, grid, pose = self.__data_tensors
 
     # Create inputs.
-    self._left_eye_input = layers.Input(shape=self._eye_shape, tensor=leye,
-                                        name="left_eye_input")
-    self._right_eye_input = layers.Input(shape=self._eye_shape, tensor=reye,
-                                         name="right_eye_input")
-    self._face_input = layers.Input(shape=self._input_shape, tensor=face,
-                                    name="face_input")
-    self._grid_input = layers.Input(shape=(25, 25), tensor=grid,
-                                    name="grid_input")
-    self._pose_input = layers.Input(shape=(3,), tensor=pose, name="pose_input")
+    input_class = keras_utils.pipeline_input
+    self._left_eye_input = input_creator(leye)(shape=self._eye_shape,
+                                               tensor=leye,
+                                               name="left_eye_input")
+    self._right_eye_input = input_creator(reye)(shape=self._eye_shape,
+                                                tensor=reye,
+                                                name="right_eye_input")
+    self._face_input = input_creator(face)(shape=self._input_shape,
+                                           tensor=face,
+                                           name="face_input")
+    self._grid_input = input_creator(grid)(shape=(25, 25), tensor=grid,
+                                           name="grid_input")
+    self._pose_input = input_creator(pose)(shape=(3,), tensor=pose,
+                                           name="pose_input")
 
     # Add preprocessing layer.
     self._left_eye_node = self._left_eye_input
