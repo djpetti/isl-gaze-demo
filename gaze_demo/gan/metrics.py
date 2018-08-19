@@ -123,7 +123,7 @@ class RefinedExamples(_Metric):
 
     # Only take the part of the batch that we need.
     refined_part = refined[:self.__max_to_write]
-    original_part = refined[:self.__max_to_write]
+    original_part = original[:self.__max_to_write]
 
     outputs = tf.map_fn(denormalize_and_write,
                         (refined_part, original_part, self.__image_names),
