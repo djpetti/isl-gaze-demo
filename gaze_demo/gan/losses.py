@@ -1,6 +1,8 @@
 import keras.backend as K
 import keras.metrics as metrics
 
+import tensorflow as tf
+
 import utils
 
 
@@ -54,6 +56,8 @@ class RealismLoss(_Loss):
     loss = K.sum(loss, axis=2)
     loss = K.sum(loss, axis=1)
 
+    loss = K.print_tensor(loss, message="Real loss: ")
+
     return loss
 
 class RegularizationLoss(_Loss):
@@ -66,6 +70,31 @@ class RegularizationLoss(_Loss):
       scale: The scale factor for the regularization. """
     self.__reg_scale = scale
 
+  def __l1_norm(self, y_true, y_pred):
+    """ Takes the L1 norm.
+    Args:
+      y_true: It expects this to be the original (unrefined) images.
+      y_pred: It expects this to be the refined images.
+    Returns:
+      The L1 norm . """
+    norm = K.abs(y_pred - y_true)
+    norm = K.sum(norm, axis=3)
+    norm = K.sum(norm, axis=2)
+    norm = K.sum(norm, axis=1)
+
+    return norm
+
+  def __standardize(self, inputs):
+    """ Standardizes the input by subtracting the mean and dividing by the
+    standard deviation.
+    Args:
+      inputs: The inputs to standardize.
+    Returns:
+      The standardized inputs. """
+    normalized, _, _ = K.normalize_batch_in_training(inputs, 1.0, 0.0,
+                                                     [0, 1, 2, 3])
+    return normalized
+
   def __call__(self, y_true, y_pred):
     """ Implements the regularization loss.
     Args:
@@ -73,14 +102,17 @@ class RegularizationLoss(_Loss):
       y_pred: It expects this to be the refined images.
     Returns:
       A value for the regularization loss. """
+    # Standardize.
+    #y_true = self.__standardize(y_true)
+    #y_pred = self.__standardize(y_pred)
+
     # Take the L1 norm.
-    norm = K.abs(y_pred - y_true)
-    norm = K.sum(norm, axis=3)
-    norm = K.sum(norm, axis=2)
-    norm = K.sum(norm, axis=1)
+    norm = self.__l1_norm(y_true, y_pred)
 
     # Scale the loss.
-    return self.__reg_scale * norm
+    loss = self.__reg_scale * norm
+    loss = K.print_tensor(loss, message="Reg loss: ")
+    return loss
 
 class CombinedLoss(_Loss):
   """ This is a custom loss function for the GAN that combines both realism and

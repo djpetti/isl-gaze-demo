@@ -37,7 +37,7 @@ def build_parser():
   parser.add_argument("-o", "--output", default="gan_weights.hd5",
                       help="Output model file.")
 
-  parser.add_argument("--learning_rate", type=float, default=0.00001,
+  parser.add_argument("--learning_rate", type=float, default=0.0001,
                       help="Learning rate for training.")
   parser.add_argument("--momentum", type=float, default=0.9,
                       help="Momentum to use for training.")

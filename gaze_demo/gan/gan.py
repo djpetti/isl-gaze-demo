@@ -4,6 +4,7 @@ import os
 import keras.backend as K
 import keras.optimizers as optimizers
 
+import numpy as np
 import tensorflow as tf
 
 from ..manager import experiment, params
@@ -97,52 +98,52 @@ class GanTrainer(experiment.Experiment):
     """ Builds the descriminator network, along with the machinery that generates
     batches for it.
     Returns:
-      The descriminator model, and the label tensor for the descriminator.
+      The descriminator network, and the label tensor for the descriminator.
     """
     batch_size = self.get_params().get_value("batch_size")
 
     # The batch is half labeled data and half refined unlabled data. Of the
     # refined half, half of that is from the buffer.
     left_eye_labeled = self.__personal_data_tensors[0][:(batch_size / 2)]
-    left_eye_unlabeled = self.__gazecap_data_tensors[0][:(batch_size / 4)]
+    left_eye_unlabeled = self.__gazecap_data_tensors[0][:(batch_size / 2)]
 
     # Run the refiner on all unlabled data.
-    refined = self.__refiner_model([left_eye_unlabeled])
+    refined = self.__frozen_refiner_model([left_eye_unlabeled])
 
     # Sample images from the buffer.
-    sampled = self.__buffer.sample(batch_size / 4)
+    #sampled = self.__buffer.sample(batch_size / 4)
 
     # Shuffle the labeled and unlabled data into a single mini-batch.
-    combined = tf.concat([left_eye_labeled, refined, sampled], 0)
+    combined = tf.concat([left_eye_labeled, refined], 0)
     indices = tf.range(combined.shape[0])
     shuffled_indices = tf.random_shuffle(indices)
 
     # Update the buffer with the new refined images.
-    update_op = self.__buffer.update(refined)
+    #update_op = self.__buffer.update(refined)
 
     # Make sure the update op actually gets run by forcing the output to depend
     # on it.
-    session = K.tensorflow_backend.get_session()
-    graph = session.graph
-    with graph.control_dependencies([update_op]):
-      combined = tf.gather(combined, shuffled_indices)
+    #session = K.tensorflow_backend.get_session()
+    #graph = session.graph
+    #with graph.control_dependencies([update_op]):
+    combined = tf.gather(combined, shuffled_indices)
 
     # Build the model.
     desc_inputs = [combined, None, None, None, None]
     descriminator = model.DescriminatorNetwork(INPUT_SHAPE,
                                                data_tensors=desc_inputs)
-    desc_model = descriminator.build()
+    test_model = descriminator.build()
 
     # Compute size of the labels tensor.
-    labels_shape = desc_model.compute_output_shape(left_eye_labeled.get_shape())
+    labels_shape = test_model.compute_output_shape(left_eye_labeled.get_shape())
     # Create initial labels tensor.
     labels_true = utils.make_real_labels(labels_shape)
     labels_fake = utils.make_fake_labels(labels_shape)
     labels = tf.concat([labels_true, labels_fake], 0)
     # Shuffle the labels.
-    labels = tf.gather(labels, shuffled_indices)
+    labels = tf.gather(labels, shuffled_indices, axis=0)
 
-    return desc_model, labels
+    return descriminator, labels
 
   def __recompile_if_needed(self):
     """ Checks if the models need to be recompiled, and does so if necessary.
@@ -172,7 +173,7 @@ class GanTrainer(experiment.Experiment):
                   % (learning_rate, momentum))
 
       # Create loss for refiner network.
-      ref_loss = losses.CombinedLoss(self.__desc_model, reg_scale)
+      ref_loss = losses.CombinedLoss(self.__frozen_desc_model, reg_scale)
       # Create metric for saving refined images.
       save_metric = metrics.RefinedExamples(self.__args.example_dir,
                                             keep_examples)
@@ -182,6 +183,7 @@ class GanTrainer(experiment.Experiment):
 
       # Set the optimizers.
       ref_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
+      #desc_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
       desc_opt = optimizers.SGD(lr=learning_rate, momentum=momentum)
       # The refiner expects its inputs to be passed as the targets.
       self.__refiner_model.compile(optimizer=ref_opt, loss=ref_loss,
@@ -190,6 +192,23 @@ class GanTrainer(experiment.Experiment):
       self.__desc_model.compile(optimizer=desc_opt, loss="binary_crossentropy",
                                 target_tensors=[self.__desc_labels],
                                 metrics=["accuracy"])
+
+      # Compile frozen versions as well.
+      utils.freeze_all(self.__frozen_refiner_model)
+      utils.freeze_all(self.__frozen_desc_model)
+
+      self.__frozen_refiner_model.compile(optimizer=ref_opt, loss=ref_loss,
+                                          target_tensors=refiner_inputs,
+                                          metrics=[save_metric])
+      self.__frozen_desc_model.compile(optimizer=desc_opt,
+                                       loss="binary_crossentropy",
+                                       target_tensors=[self.__desc_labels],
+                                       metrics=["accuracy"])
+
+      # The frozen ones are built from the same layers as the unfrozen ones, so
+      # make sure that the layers remain unfrozen by default.
+      utils.unfreeze_all(self.__frozen_refiner_model)
+      utils.unfreeze_all(self.__frozen_desc_model)
 
       # We only need to compile a maximum of 1 times.
       break
@@ -339,9 +358,12 @@ class GanTrainer(experiment.Experiment):
     refiner = model.RefinerNetwork(INPUT_SHAPE,
                                    data_tensors=self.__gazecap_data_tensors)
     self.__refiner_model = refiner.build()
+    self.__frozen_refiner_model = refiner.build()
 
     # Create descriminator model.
-    self.__desc_model, self.__desc_labels = self.__build_descrim()
+    desc_network, self.__desc_labels = self.__build_descrim()
+    self.__desc_model = desc_network.build()
+    self.__frozen_desc_model = desc_network.build()
 
     # Create a coordinator and run queues.
     coord = tf.train.Coordinator()

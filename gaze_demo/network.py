@@ -1,3 +1,5 @@
+import logging
+
 from keras.models import Model, load_model
 import keras.applications as applications
 import keras.backend as K
@@ -8,6 +10,9 @@ import keras.regularizers as regularizers
 import tensorflow as tf
 
 from pipeline import keras_utils
+
+
+logger = logging.getLogger(__name__)
 
 
 class Network(object):
@@ -30,6 +35,9 @@ class Network(object):
     self.__eye_preproc = eye_preproc
     self._fine_tune = fine_tune
     self._input_shape = input_shape
+
+    # The eventual outputs of the model.
+    self._outputs = None
 
     self._eye_shape = self._input_shape
     if eye_shape is not None:
@@ -88,22 +96,36 @@ class Network(object):
       The outputs that will be used in the model. """
     raise NotImplementedError("Must be implemented by subclass.")
 
-  def build(self):
-    """ Builds the network.
+  def _create_model(self):
+    """ Creates the model. When this is called, we can safely assume that all
+    the inputs and outputs are initialized.
     Returns:
-      The built model. """
-    # Build the common parts.
-    self._build_common()
-    # Build the custom parts.
-    outputs = self._build_custom()
-
-    # Crea the model.
+      The model that it created. """
     model = Model(inputs=[self._left_eye_input, self._right_eye_input,
                           self._face_input, self._grid_input, self._pose_input],
-                  outputs=outputs)
+                  outputs=self._outputs)
     model.summary()
 
     return model
+
+  def build(self):
+    """ Builds the network.
+    Note that the implementation creates the layers once and then recycles them
+    for multiple calls to build().
+    Returns:
+      The built model. """
+    # Only create new layers if we don't have old ones already.
+    if self._outputs is None:
+      logger.debug("Building layers.")
+
+      # Build the common parts.
+      self._build_common()
+      # Build the custom parts.
+      self._outputs = self._build_custom()
+
+    # Create the model.
+    logger.debug("Creating new model: %s", self.__class__.__name__)
+    return self._create_model()
 
 class HeadPoseNetwork(Network):
   """ Simple network that incorporates the eyes and the estimated head pose. """
