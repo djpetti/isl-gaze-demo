@@ -102,31 +102,52 @@ class GanTrainer(experiment.Experiment):
     """
     batch_size = self.get_params().get_value("batch_size")
 
+    # Figure out whether we should sample from the buffer or not. This will
+    # impact the number of images that we need to refine.
+    num_refined = tf.cond(self.__buffer.is_saturated(),
+                          lambda: batch_size / 4,
+                          lambda: batch_size / 2)
+
     # The batch is half labeled data and half refined unlabled data. Of the
     # refined half, half of that is from the buffer.
     left_eye_labeled = self.__personal_data_tensors[0][:(batch_size / 2)]
-    left_eye_unlabeled = self.__gazecap_data_tensors[0][:(batch_size / 2)]
+    left_eye_unlabeled = self.__gazecap_data_tensors[0][:(num_refined)]
 
     # Run the refiner on all unlabled data.
     refined = self.__frozen_refiner_model([left_eye_unlabeled])
 
-    # Sample images from the buffer.
-    #sampled = self.__buffer.sample(batch_size / 4)
+    def combine():
+      """ Combines refined and labeled data to produce a single batch.
+      Returns:
+        The completed batch. """
+      return tf.concat([left_eye_labeled, refined], 0)
 
-    # Shuffle the labeled and unlabled data into a single mini-batch.
-    combined = tf.concat([left_eye_labeled, refined], 0)
-    indices = tf.range(combined.shape[0])
+    def sample_and_combine():
+      """ Samples images from the buffer, and combines them with refined and
+      labeled data to produce a batch.
+      Returns:
+        The completed batch. """
+      sampled = self.__buffer.sample(batch_size / 4)
+      # Combine everything.
+      return tf.concat([left_eye_labeled, refined, sampled], 0)
+
+    # Generate combined batch.
+    combined = tf.cond(self.__buffer.is_saturated(),
+                       sample_and_combine, combine)
+
+    # Shuffle the batch.
+    indices = tf.range(batch_size)
     shuffled_indices = tf.random_shuffle(indices)
 
     # Update the buffer with the new refined images.
-    #update_op = self.__buffer.update(refined)
+    update_op = self.__buffer.update(refined)
 
     # Make sure the update op actually gets run by forcing the output to depend
     # on it.
-    #session = K.tensorflow_backend.get_session()
-    #graph = session.graph
-    #with graph.control_dependencies([update_op]):
-    combined = tf.gather(combined, shuffled_indices)
+    session = K.tensorflow_backend.get_session()
+    graph = session.graph
+    with graph.control_dependencies([update_op]):
+      combined = tf.gather(combined, shuffled_indices)
 
     # Build the model.
     desc_inputs = [combined, None, None, None, None]
