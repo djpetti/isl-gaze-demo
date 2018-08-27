@@ -37,55 +37,6 @@ def _float_feature(value):
     The corresponding feature. """
   return tf.train.Feature(float_list=tf.train.FloatList(value=value))
 
-def extract_crop_data(crop_info):
-  """ Extracts the crop bounding data from the raw structure.
-  Args:
-    crop_info: The raw crop data structure.
-  Returns:
-    The x and y coordinates of the top left corner, and width and height of
-    the crop, and whether the crop is valid. """
-  x_crop = crop_info["X"]
-  y_crop = crop_info["Y"]
-  w_crop = crop_info["W"]
-  h_crop = crop_info["H"]
-  crop_valid = crop_info["IsValid"]
-
-  x_crop = np.asarray(x_crop, dtype=np.float32)
-  y_crop = np.asarray(y_crop, dtype=np.float32)
-  w_crop = np.asarray(w_crop, dtype=np.float32)
-  h_crop = np.asarray(h_crop, dtype=np.float32)
-  crop_valid = np.asarray(crop_valid, dtype=np.float32)
-
-  return x_crop, y_crop, w_crop, h_crop, crop_valid
-
-def extract_face_crop(image, face_data):
-  """ Extract the face crop from an image.
-  Args:
-    image: The image to process.
-    face_data: The crop data for this image.
-  Returns:
-    A cropped version of the image. A None value in this
-    list indicates a face crop that was not valid. """
-  face_x, face_y, face_w, face_h, _ = face_data
-
-  start_x = int(face_x)
-  end_x = start_x + int(face_w)
-  start_y = int(face_y)
-  end_y = start_y + int(face_h)
-
-  start_x = max(0, start_x)
-  end_x = min(image.shape[1], end_x)
-  start_y = max(0, start_y)
-  end_y = min(image.shape[0], end_y)
-
-  # Crop the image.
-  crop = image[start_y:end_y, start_x:end_x]
-
-  # Resize the crop.
-  crop = cv2.resize(crop, (400, 400))
-
-  return crop
-
 
 class Database:
   """ Writes images onto the disk. """
@@ -128,13 +79,16 @@ class Database:
 class ImageProcessor:
   """ Loads, processes, and writes out images to a database. """
 
-  def __init__(self, train_db, test_db, screen_res):
+  def __init__(self, train_db, test_db, screen_res, skip):
     """
     Args:
       train_db: The name of the training database file.
       test_db: The name of the testing database file.
-      screen_res: The (x, y) resolution of the screen. """
+      screen_res: The (x, y) resolution of the screen.
+      skip: Number of early images to skip. """
     self.__screen_x, self.__screen_y = screen_res
+    self.__skip_before = skip
+
     # The list of image paths to load.
     self.__image_paths = []
 
@@ -154,7 +108,7 @@ class ImageProcessor:
 
     # Get the frame number.
     frame_num = int(filename.split("_")[2].rstrip(".jpg"))
-    if frame_num < 5:
+    if frame_num < self.__skip_before:
       return True
     return False
 
@@ -334,18 +288,19 @@ class ImageProcessor:
       self.__write_image(image_path)
 
 
-def crop_sessions(in_dir, out_dir, screen_res):
+def crop_sessions(in_dir, out_dir, screen_res, skip):
   """ Crops all the data in various sessions.
   Args:
     in_dir: The root directory where the session data is stored.
     out_dir: The output root directory.
-    screen_res: The resolution of the user's screen. """
+    screen_res: The resolution of the user's screen.
+    skip: Number of early frames to skip. """
   # Choose database files.
   train_db = os.path.join(out_dir, "eye_data_train.tfrecord")
   test_db = os.path.join(out_dir, "eye_data_test.tfrecord")
   print "Creating files: %s and %s" % (train_db, test_db)
 
-  image_processor = ImageProcessor(train_db, test_db, screen_res)
+  image_processor = ImageProcessor(train_db, test_db, screen_res, skip)
 
   for session in os.listdir(in_dir):
     session_path = os.path.join(in_dir, session)
@@ -370,11 +325,13 @@ def main():
                       help="The horizontal resolution of the screen.")
   parser.add_argument("screen_y", type=int,
                       help="The vertical resolution of the screen.")
+  parser.add_argument("-s", "--skip", type=int, default=5,
+      help="Skip the first n frames. Useful if the eye is still moving.")
   args = parser.parse_args()
 
   # Crop the dataset.
   screen_res = (args.screen_x, args.screen_y)
-  crop_sessions(args.data_dir, args.out_dir, screen_res)
+  crop_sessions(args.data_dir, args.out_dir, screen_res, args.skip)
 
 
 if __name__ == "__main__":
