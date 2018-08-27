@@ -43,14 +43,26 @@ class ImageBuffer(object):
       A boolean Tensor indicating whether the buffer is full. """
     return tf.equal(self.__buffer_size, self.__fill_index)
 
+  def supports_sample_size(self, size):
+    """ Checks whether the buffer has enough data to support a sample of a given
+    size.
+    Args:
+      size: The size to check for.
+    Returns:
+      A boolean tensor. True if the sample is supported, false otherwise. """
+    return tf.greater(self.__fill_index, size)
+
   def sample(self, size):
     """ Randomly samples images from the buffer.
     Args:
       size: The number of images to sample.
     Returns:
       An op producing a tensor of the sampled images. """
-    # An easy way of implementing this is to randomly shuffle and then slice.
     my_buffer = self.__get_buffer()
+    # Don't use any parts of the buffer that aren't yet filled.
+    my_buffer = my_buffer[:self.__fill_index]
+
+    # An easy way of implementing this is to randomly shuffle and then slice.
     shuffled = tf.random_shuffle(my_buffer)
     return shuffled[0:size]
 

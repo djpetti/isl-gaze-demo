@@ -104,7 +104,7 @@ class GanTrainer(experiment.Experiment):
 
     # Figure out whether we should sample from the buffer or not. This will
     # impact the number of images that we need to refine.
-    num_refined = tf.cond(self.__buffer.is_saturated(),
+    num_refined = tf.cond(self.__buffer.supports_sample_size(batch_size / 4),
                           lambda: batch_size / 4,
                           lambda: batch_size / 2)
 
@@ -132,7 +132,7 @@ class GanTrainer(experiment.Experiment):
       return tf.concat([left_eye_labeled, refined, sampled], 0)
 
     # Generate combined batch.
-    combined = tf.cond(self.__buffer.is_saturated(),
+    combined = tf.cond(self.__buffer.supports_sample_size(batch_size / 4),
                        sample_and_combine, combine)
 
     # Shuffle the batch.
