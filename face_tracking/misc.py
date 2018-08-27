@@ -8,7 +8,6 @@ Created on Thu Oct 13 22:19:29 2016
 import scipy.io as sio
 import scipy
 import numpy as np
-import matplotlib.pyplot as plt
 import cv2
 def rodrigues(r):
     def S(n):
