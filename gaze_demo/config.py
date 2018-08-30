@@ -7,7 +7,7 @@ SCREEN_HEIGHT=1080
 # Model to use for prediction.
 EYE_MODEL = "models/eye_model_both_eyes.hd5"
 # Model architecture to use.
-NET_ARCH = network.HeadPoseNetwork
+NET_ARCH = network.SingleEyeNetwork
 
 # The minimum ratio of eye height to eye width before we consider the eye
 # closed.

@@ -202,3 +202,66 @@ class HeadPoseNetwork(Network):
     predictions = layers.Dense(2, activation="linear")(values)
 
     return predictions
+
+class SingleEyeNetwork(Network):
+  """ Also incorporates the estimated headpose, but uses only a single eye
+  pathway. """
+
+  def _build_custom(self):
+    trainable = not self._fine_tune
+
+    # Eye layers.
+    conv_e1 = layers.Convolution2D(50, (5, 5), strides=(1, 1),
+                                   activation="relu")
+    norm_e2 = layers.BatchNormalization()
+
+    conv_e3 = layers.Convolution2D(100, (1, 1), activation="relu")
+    norm_e4 = layers.BatchNormalization()
+    conv_e5 = layers.Convolution2D(50, (1, 1), activation="relu")
+    norm_e6 = layers.BatchNormalization()
+
+    pool_e7 = layers.MaxPooling2D()
+
+    conv_e8 = layers.Convolution2D(100, (5, 5), strides=(1, 1),
+                                   activation="relu")
+    norm_e9 = layers.BatchNormalization()
+
+    pool_e10 = layers.MaxPooling2D()
+
+    flat_e11 = layers.Flatten()
+
+    # Left eye pathway.
+    le1 = conv_e1(self._left_eye_node)
+    le2 = norm_e2(le1)
+    le3 = conv_e3(le2)
+    le4 = norm_e4(le3)
+    le5 = conv_e5(le4)
+    le6 = norm_e6(le5)
+    le7 = pool_e7(le6)
+    le8 = conv_e8(le7)
+    le9 = norm_e9(le8)
+    le10 = pool_e10(le9)
+    le11 = flat_e11(le10)
+
+    # Add a dense layer so it's a consistent size.
+    eyes_flat = layers.Dense(100)(le11)
+
+    # Head pose input.
+    pose_values = layers.Dense(100, activation="relu")(self._pose_input)
+    pose_values = layers.BatchNormalization()(pose_values)
+
+    pose_values = layers.Dense(50, activation="relu")(pose_values)
+    pose_values = layers.BatchNormalization()(pose_values)
+
+    pose_values = layers.Dense(50, activation="relu")(pose_values)
+    pose_values = layers.BatchNormalization()(pose_values)
+
+    values = layers.concatenate([eyes_flat, pose_values])
+
+    values = layers.Dense(256, activation="relu")(values)
+    values = layers.BatchNormalization()(values)
+    values = layers.Dense(128, activation="relu")(values)
+    values = layers.BatchNormalization()(values)
+    predictions = layers.Dense(2, activation="linear")(values)
+
+    return predictions
