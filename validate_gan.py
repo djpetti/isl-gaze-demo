@@ -17,13 +17,16 @@ def build_parser():
   parser.add_argument("train_set", help="The training data TFRecords file.")
   parser.add_argument("test_set", help="The testing data TFRecords file.")
   parser.add_argument("est_model", help="The estimator model to validate with.")
+  parser.add_argument("ref_model", help="The refiner model to validate with.")
 
-  parser.add_argument("-b", "--batch_size", type=int, default=256,
+  parser.add_argument("--batch_size", type=int, default=256,
                       help="The batch size to use for validation.")
   parser.add_argument("-i", "--valid_iters", type=int, default=5,
                       help="Number of iterations to validate for.")
   parser.add_argument("--iter_steps", type=int, default=50,
                       help="Number of steps in each iteration.")
+  parser.add_argument("-b", "--baseline", action="store_true",
+                      help="Whether to perform baseline validation.")
 
   return parser
 
@@ -32,7 +35,7 @@ def main():
   parser = build_parser()
 
   validator = validate.GanValidator(parser)
-  validator.validate_baseline()
+  validator.validate()
 
 
 if __name__ == "__main__":
