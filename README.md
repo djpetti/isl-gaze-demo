@@ -25,9 +25,9 @@ on how to collect data, train a model, and use the model from realtime tracking.
 ## Installation
 
 Before starting, make sure that you have OpenCV 3 installed, as well as
-TensorFlow and the Python liblinear bindings. (The ``python-liblinear``` package
+TensorFlow and the Python liblinear bindings. (The `python-liblinear` package
 in Ubuntu should work.) Also, make sure that you have TK installed.
-(```python-tk``` package in Ubuntu.) Finally, this demo uses
+(`python-tk` package in Ubuntu.) Finally, this demo uses
 [Keras](https://keras.io/), which can be installed via Pip.
 
 ## Data Collection
