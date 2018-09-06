@@ -7,7 +7,7 @@ import keras.optimizers as optimizers
 import numpy as np
 import tensorflow as tf
 
-from ..manager import experiment, params
+from rhodopsin import experiment, params
 
 import image_buffer
 import losses
